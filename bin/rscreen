@@ -1,0 +1,17 @@
+#!/bin/ksh
+
+arg1=${1:-1}
+if [[ "$arg1" != +([0-9]) ]]; then
+    print -u2 "Error: argument must be a decimal number"
+    exit 1
+fi
+shift
+
+screen -ls|grep pts|head -$arg1 | tail -1|read screen_str state
+
+if [[ "$state" = ?Detached? ]]; then
+    exec screen -r $screen_str "$@"
+else
+    exec screen -d -r $screen_str "$@"
+fi
+

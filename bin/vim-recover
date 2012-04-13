@@ -1,0 +1,100 @@
+#!/bin/ksh
+
+set -o noglob
+
+function err {
+    typeset status
+
+    status=$1
+    shift
+    print -u2 -- "$@"
+    exit 1
+}
+
+function confirm {
+    $confirm || return 0
+    print -n -- "${1} (y/n) "
+    shift
+    read ANS
+    [[ "$ANS" = @([yY]|yes|Yes) ]] && return 0
+    (($# == 0)) && err 1 "Exiting..."
+    err "$@"
+}
+
+function usage {
+    err 1 "Usage: ${0##*/} [-l] [-r] [-D] [dir]
+    This program finds, lists, recovers, and removes VIM swap files.
+
+    Options:
+
+	-l list swap files
+	-r recover swap files
+	-D delete swap files
+	-n do not confirm actions
+
+    By default swap files are only listed.
+   
+    Use '${0##*/} -l -r -D' to cleanup your git workspace.
+"
+}
+
+dir=.
+confirm=:
+delete_them=false
+list=false
+recover=false
+while (($# > 0)); do
+    case "$1" in
+    -h) usage;;
+    -D) delete_them=:;;
+    -l) list=:;;
+    -r) recover=:;;
+    -n) confirm=false;;
+    -*) usage;;
+    *) dir=$1;;
+    esac
+    shift
+done
+
+$list && $delete_them && $recover || list=:
+
+[[ -d .git ]] ||
+    err 1 "Run this script only at the top-level of a git workspace"
+
+swap_files_list=$(mktemp /tmp/vr-XXXX)
+script=$(mktemp /tmp/vr-XXXX)
+
+trap "rm -f $script $swap_files_list ${swap_files_list}-x" EXIT INT QUIT HUP
+trap "rm -f $script $swap_files_list ${swap_files_list}-x; exit 0" INT QUIT HUP
+
+cat > "$script" <<EOF
+:wq!
+EOF
+
+[[ -n "$swap_files_list" && -f "$swap_files_list" ]] ||
+    err 2 "Could not make temporary file"
+
+find "${1:-.}" -name .\*.sw\? > "$swap_files_list"
+
+n=$(wc -l < "$swap_files_list")
+
+((n == 0)) && err 0 "No swap files found; workspace is clean"
+
+sed -e 's;/\.;/;' -e 's/\.sw.$//' < "$swap_files_list" > "${swap_files_list}-x"
+
+if $list; then
+    cat "${swap_files_list}-x"
+fi
+
+if $recover; then
+    confirm "Recover?  Have you saved your current changes?"
+    while read f; do
+	vim -s "$script" -r "$f" < /dev/tty
+    done < "${swap_files_list}-x"
+    print "Done."
+fi
+
+if $delete_them; then
+    confirm "Ready to delete swap files?"
+    xargs rm -f < "$swap_files_list"
+fi

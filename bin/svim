@@ -1,0 +1,107 @@
+#!/bin/ksh
+
+# Makes for safer scripting
+set -o noglob
+OIFS="$IFS"
+IFS=
+PATH=/usr/bin:/bin:$PATH
+
+# This script is to be used as the value of $EDITOR for cscope in a
+# screen(1) or tmux(1) session.  Selecting a file to edit should then
+# cause a new window to open with the user's preferred editor running in
+# it to edit the selected file, all the while the script exits so that
+# control can return to cscope.  This way the user can start many
+# concurrent edits from one cscope session.
+
+# Figure out what the real $EDITOR was intended to be from the current
+# setting of $EDITOR or from this program's name, removing any leading
+# 's' (since this program is "svim" or "s<whatever>").
+#
+# For example, calling this script "svim" causes it to start VIM;
+# calling it "semacs" would cause it to start Emacs.
+editor=${EDITOR:-$0}
+editor=${editor##*/}
+editor=${editor#s}
+: ${editor:=vim}
+export EDITOR=$editor
+
+roeditor=${ROEDITOR:-view}
+
+# Not in screen or tmux?  Punt.  (If in both... well, we pick screen.)
+[[ -z "$STY" && -z "$TMUX" ]] && exec "$editor" "$@"
+
+# Find out if the parent is cscope
+function is_parent_cscope {
+    typeset IFS
+    IFS="$OIFS"
+    clear
+    if [[ -f /proc/self/attr/current ]]; then
+	# Linux fast path
+	read pid comm j ppid j < /proc/self/stat
+	read j comm j ppid j < /proc/$ppid/stat
+	[[ "$comm" != *cscope* ]] && read j comm j j < /proc/$ppid/stat
+	[[ "$comm" = *cscope* ]] && return 0
+    elif [[ -f /kernel/genunix ]]; then
+	# Solaris fast path
+	ptree | grep cscope > /dev/null 2>&1 && return 0
+    else
+	# Slow path
+	comm="$(ps -o comm= -p $PPID)"
+    fi
+    [[ "$comm" = *cscope* ]] && return 0
+    return 1
+}
+
+# Don't try to start a new window _unless_ it was cscope that spawned us
+# (the script appears to exit immediately, which causes many tools that
+# spawn $EDITOR to think the user did not change the file at all).  If
+# other tools like cscope could benefit from this behavior just add them
+# here:
+if ! is_parent_cscope; then
+	exec $editor "$@"
+	printf 'Failed to exec $EDITOR (%s)' "$EDITOR" 1>&2
+	exit 1
+fi
+
+# I often edit/view the same file from cscope in the same screen/tmux
+# session.  I don't want to be prompted by VIM on the second, third, ..,
+# nth viewing.  This code decides whether to edit the file read-only.
+use_roeditor=false
+if [[ $EDITOR = vim ]]; then
+    files=0
+    for arg in "$@"; do
+	[[ "$arg" = -* || "$arg" = [+]* ]] && continue
+	((files++))
+	[[ "$arg" = */* && -f "${arg%/*}/.${arg##*/}.swp" ]] && use_roeditor=true
+	[[ "$arg" != */* && -f ".${arg}.swp" ]] && use_roeditor=true
+	# cscope doesn't have us edit more than one file at a time
+	((files > 1)) && use_roeditor=false
+    done
+fi
+
+$use_roeditor && editor=$roeditor
+
+# Figure out the title for the new screen(1)/tmux(1) window
+for arg in "$@"; do
+	[[ "$arg" = -* || "$arg" = [+]* ]] && continue
+	title="${SVIM_TITLE_PREFIX}${arg##*/}"
+	break
+done
+
+# Start $EDITOR in a new window if we're in a session.
+#
+# Note that screen/tmux in this mode will use IPC to ask the master
+# session process to start the new window, then the client screen/tmux
+# process will exit, and since we exec it, we exit too.
+if [[ -n "$STY" && $# -gt 0 ]]; then
+    exec screen -h 1 -t "$title" "$editor" -X "$@"
+elif [[ -n "$TMUX" && $# -gt 0 ]]; then
+    IFS=' '
+    exec tmux new-window -n "$title" "$editor -X $*"
+fi
+
+# Fallbacks (no screen, ultimately just vi).  But we don't exit in this
+# case.
+exec $editor "$@"
+printf 'Failed to exec $EDITOR (%s)' "$EDITOR" 1>&2
+exit 1

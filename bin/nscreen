@@ -1,0 +1,3 @@
+#!/bin/ksh
+
+HISTFILE= EDITOR=svim exec screen
