@@ -1,0 +1,5 @@
+.ssh/
+id_ecdsa
+id_dsa
+id_rsa
+/.ssh/
