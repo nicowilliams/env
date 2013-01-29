@@ -72,25 +72,25 @@
         )
     }
 
-    function which_branch {
+    function vcs_branch {
         if (($# == 0)); then
             set -- $(which_vcs)
         fi
         if (($# == 0)); then
             return
         fi
-        which_branch_$1
+        vcs_branch_$1
     }
 
-    function which_branch_git {
+    function vcs_branch_git {
         git branch 2>/dev/null|grep '^\*'|sed 's/^\*.//'
     }
 
-    function which_branch_hg {
+    function vcs_branch_hg {
         hg branch 2>/dev/null
     }
 
-    function which_branch_fossil {
+    function vcs_branch_fossil {
         fossil branch 2>/dev/null|grep '^\*'|sed 's/^\*.//'
     }
 
@@ -155,7 +155,7 @@
         fi
 
         top=$(vcs_top $vcs)
-        branch=$(which_branch $vcs)
+        branch=$(vcs_branch $vcs)
         m=$(vcs_dirty_count $vcs)
 
         # Use the basename of the top-level as the workspace name and
@@ -178,66 +178,6 @@
         fi
     }
 
-    # Output PS1 value in an SCM-aware and useful way
-    function gitps1 {
-        typeset gb gt
-        typeset fb ft
-        typeset c p t u scm
-        typeset R="\033[0;31m" Y="\033[0;33m" G="\033[0;32m"
-        typeset B="\033[0;34m" N="\033[0m" 
-
-        # Get top-level and current branch for fossil then git
-        ft=$(fossil status 2>/dev/null|grep ^local-root:|awk '{print $2}')
-        fb=$(fossil branch 2>/dev/null|grep '^\*'|sed 's/^\*.//')
-        gt=$(git rev-parse --show-toplevel 2>/dev/null)
-        gb=$(git branch 2>/dev/null|grep '^\*'|sed 's/^\*.//')
-
-        scm=
-        [[ -n "$ft" ]] && scm=FOSSIL
-        [[ -n "$gt" ]] && scm=GIT
-
-        u=${USER:-${LOGNAME:-$(/usr/bin/whoami)}}
-
-        # Use the basename of the top-level as the workspace name and
-        # work out an abbreviation of $PWD
-        t=${gt:-$ft}
-        t=${t%/}
-        if [[ "$PWD" = $t ]]; then
-            p=TOP
-        else
-            p=TOP/.../${PWD##*/}
-        fi
-        t="${t##*/}"
-
-        # Not in an SCM?
-        if [[ -z "$gb" && -z "$fb" ]]; then
-            if [[ "$u" = root ]]; then
-                printf ": %s${R}#${N}; \n" "${HN%%.*}[!] "
-            else
-                printf ": %s%%; \n" "${HN%%.*}[!] "
-            fi
-            return
-        fi
-
-        # Count dirty files
-        if [[ -n "$gt" ]]; then
-            m="$(git status -suno 2>/dev/null|wc -l)"
-        elif [[ -n "$ft" ]]; then
-            m="$(git status -suno 2>/dev/null|wc -l)"
-        else
-            m=0
-        fi
-
-        # Output SCM:top-level-basename[branch]:path-abbrev[dirty-count:cmdnum]%
-        if [[ "$u" = root ]]; then
-            printf ": ${R}%s${N}:${Y}%s${N}[${G}%s${N}]:%s[%s:%s]${R}#${N}; \n" \
-                "$scm" "$t" "${gb:-$fb}" "$p" "$m" '!'
-        else
-            printf ": ${R}%s${N}:${Y}%s${N}[${G}%s${N}]:%s[%s:%s]%%; \n" \
-                "$scm" "$t" "${gb:-$fb}" "$p" "$m" '!'
-        fi
-    }
-    
     function libe {
 	typeset diffs
 
