@@ -3,13 +3,14 @@ stty erase 
 set -o vi
 set -o trackall
 HN=$(uname -n)
-export PS1="$(/usr/bin/whoami)@${HN%%.*}[!]% "
+export PS1=": $(/usr/bin/whoami)@${HN%%.*}[!]; "
 : ""
 export PAGER=less
 export PRINTER=uaus08p02dbl
 [[ -f $HOME/.kshaliases ]] && . $HOME/.kshaliases
 [[ -f $HOME/.kshcd ]] && . $HOME/.kshcd
 export SHELL=/bin/ksh
+export PS1='$(vcs_ps1)'
 
 umask 022
 

@@ -43,6 +43,200 @@
 	# No arguments, so just call git add -uv
 	git add -uv $opts
     }
+
+    function which_vcs {
+        # Fast path: we're already at the top-level directory
+        if [[ -d "${1:-$PWD}/.git" ]]; then
+            printf "git\n"
+            return
+        elif [[ -d "${1:-$PWD}/.hg" ]]; then
+            printf "hg\n"
+            return
+        elif [[ -d "${1:-$PWD}/_FOSSIL_" ]]; then
+            printf "fossil\n"
+            return
+        fi
+        # Slow path: exec tools
+        (
+            cd "${1:-$PWD}" || return
+            if git rev-parse --show-toplevel >/dev/null 2>&1; then
+                printf "git\n"
+                return
+            elif hg root >/dev/null 2>&1; then
+                printf "hg\n"
+                return
+            elif fossil status >/dev/null 2>&1; then
+                printf "fossil\n"
+                return
+            fi
+        )
+    }
+
+    function which_branch {
+        if (($# == 0)); then
+            set -- $(which_vcs)
+        fi
+        if (($# == 0)); then
+            return
+        fi
+        which_branch_$1
+    }
+
+    function which_branch_git {
+        git branch 2>/dev/null|grep '^\*'|sed 's/^\*.//'
+    }
+
+    function which_branch_hg {
+        hg branch 2>/dev/null
+    }
+
+    function which_branch_fossil {
+        fossil branch 2>/dev/null|grep '^\*'|sed 's/^\*.//'
+    }
+
+    function vcs_top {
+        if (($# == 1)); then
+            vcs_top_$1
+            return
+        fi
+        vcs_top_git || vcs_top_hg || vcs_top_fossil
+    }
+
+    function vcs_top_git {
+        git rev-parse --show-toplevel 2>/dev/null
+    }
+
+    function vcs_top_hg {
+        hg root 2>/dev/null
+    }
+
+    function vcs_top_fossil {
+        fossil status 2>/dev/null|grep ^local-root:|awk '{print $2}'
+    }
+
+    function vcs_dirty_count {
+        if (($# == 1)); then
+            vcs_dirty_count_$1
+            return
+        fi
+        vcs_dirty_count_git || vcs_dirty_count_hg || vcs_dirty_count_fossil || (printf "-\n"; exit 1)
+    }
+
+    function vcs_dirty_count_git {
+        git status -suno 2>/dev/null|wc -l
+    }
+
+    function vcs_dirty_count_hg {
+        hg status|grep -v '^[?]'|wc -l
+    }
+
+    function vcs_dirty_count_fossil {
+        fossil status 2>/dev/null|grep ^EDITED|wc -l
+    }
+
+    # Output PS1 value in an SCM-aware and useful way
+    function vcs_ps1 {
+        typeset vcs top branch
+        typeset c p t u
+        typeset R="\033[0;31m" Y="\033[0;33m" G="\033[0;32m"
+        typeset B="\033[0;34m" N="\033[0m" 
+
+        u=${USER:-${LOGNAME:-$(/usr/bin/whoami)}}
+        vcs=$(which_vcs)
+
+        # Not in an SCM?
+        if [[ -z "$vcs" ]]; then
+            if [[ "$u" = root ]]; then
+                printf ": %s${R}#${N}; \n" "${HN%%.*}[!] "
+            else
+                printf ": %s%%; \n" "${HN%%.*}[!] "
+            fi
+            return
+        fi
+
+        top=$(vcs_top $vcs)
+        branch=$(which_branch $vcs)
+        m=$(vcs_dirty_count $vcs)
+
+        # Use the basename of the top-level as the workspace name and
+        # work out an abbreviation of $PWD
+        t=${top%/}
+        if [[ "$PWD" = $t ]]; then
+            p=TOP
+        else
+            p=TOP/.../${PWD##*/}
+        fi
+        t="${t##*/}"
+
+        # Output SCM:top-level-basename[branch]:path-abbrev[dirty-count:cmdnum]%
+        if [[ "$u" = root ]]; then
+            printf ": ${R}%s${N}:${Y}%s${N}[${G}%s${N}]:%s[%s:%s]${R}#${N}; \n" \
+                "$vcs" "$t" "${branch}" "$p" "$m" '!'
+        else
+            printf ": ${R}%s${N}:${Y}%s${N}[${G}%s${N}]:%s[%s:%s]%%; \n" \
+                "$vcs" "$t" "${branch}" "$p" "$m" '!'
+        fi
+    }
+
+    # Output PS1 value in an SCM-aware and useful way
+    function gitps1 {
+        typeset gb gt
+        typeset fb ft
+        typeset c p t u scm
+        typeset R="\033[0;31m" Y="\033[0;33m" G="\033[0;32m"
+        typeset B="\033[0;34m" N="\033[0m" 
+
+        # Get top-level and current branch for fossil then git
+        ft=$(fossil status 2>/dev/null|grep ^local-root:|awk '{print $2}')
+        fb=$(fossil branch 2>/dev/null|grep '^\*'|sed 's/^\*.//')
+        gt=$(git rev-parse --show-toplevel 2>/dev/null)
+        gb=$(git branch 2>/dev/null|grep '^\*'|sed 's/^\*.//')
+
+        scm=
+        [[ -n "$ft" ]] && scm=FOSSIL
+        [[ -n "$gt" ]] && scm=GIT
+
+        u=${USER:-${LOGNAME:-$(/usr/bin/whoami)}}
+
+        # Use the basename of the top-level as the workspace name and
+        # work out an abbreviation of $PWD
+        t=${gt:-$ft}
+        t=${t%/}
+        if [[ "$PWD" = $t ]]; then
+            p=TOP
+        else
+            p=TOP/.../${PWD##*/}
+        fi
+        t="${t##*/}"
+
+        # Not in an SCM?
+        if [[ -z "$gb" && -z "$fb" ]]; then
+            if [[ "$u" = root ]]; then
+                printf ": %s${R}#${N}; \n" "${HN%%.*}[!] "
+            else
+                printf ": %s%%; \n" "${HN%%.*}[!] "
+            fi
+            return
+        fi
+
+        # Count dirty files
+        if [[ -n "$gt" ]]; then
+            m="$(git status -suno 2>/dev/null|wc -l)"
+        elif [[ -n "$ft" ]]; then
+            m="$(git status -suno 2>/dev/null|wc -l)"
+        else
+            m=0
+        fi
+
+        # Output SCM:top-level-basename[branch]:path-abbrev[dirty-count:cmdnum]%
+        if [[ "$u" = root ]]; then
+            printf ": ${R}%s${N}:${Y}%s${N}[${G}%s${N}]:%s[%s:%s]${R}#${N}; \n" \
+                "$scm" "$t" "${gb:-$fb}" "$p" "$m" '!'
+        else
+            printf ": ${R}%s${N}:${Y}%s${N}[${G}%s${N}]:%s[%s:%s]%%; \n" \
+                "$scm" "$t" "${gb:-$fb}" "$p" "$m" '!'
+        fi
+    }
     
     function libe {
 	typeset diffs
@@ -239,14 +433,6 @@
             find "${dargs[@]}" \( \( -name SCCS -o -name CVS -o -name .hg -o -name .git \) -type d -prune \) -o -print
 	    return $?
         else
-            for i in "$@"
-            do 
-                if [[ "X$i" = "X-print" ]]
-                then
-                    find "${dargs[@]}" \( \( -name SCCS -o -name CVS -o -name .hg -o -name .git \) -type d -prune \) -o \( "$@" \)
-                    return $?
-                fi
-            done
             find "${dargs[@]}" \( \( -name SCCS -o -name CVS -o -name .hg -o -name .git \) -type d -prune \) -o \( \( "$@" \) -print \)
 	    return $?
         fi
@@ -541,7 +727,7 @@
 	    shift
 	done
 	#find "${fargs[@]}" \( -name SCCS -type d -prune \) -o  \( \( -name \*.\[chxyl\] -o -name \*.cc \) -print \) | grep -v /SCCS/ | xargs grep "$@"
-	nsfind "${fargs[@]}" \( -name \*.\[chxysil\] -o -name \*.cc -o -name \*.[ch]pp -o -name \*.java -o -name \*.p\[lm\] \) -print | xargs grep "$@"
+	nsfind "${fargs[@]}" \( -name \*.\[chxysil\] -o -name \*.cc -o -name \*.[ch]pp -o -name \*.java -o -name \*.p\[lm\] \) | xargs grep "$@"
     }
 
     fseg () {
@@ -552,7 +738,7 @@
 	    fargs[${#fargs[@]}]="$1"
 	    shift
 	done
-	nsfind "${fargs[@]}" \( -name \*.\[chxyl\] -o -name \*.cc -o -name \*.[ch]pp -o -name \*.java \) -print | xargs egrep "$@"
+	nsfind "${fargs[@]}" \( -name \*.\[chxyl\] -o -name \*.cc -o -name \*.[ch]pp -o -name \*.java \) | xargs egrep "$@"
     }
 
     fmg () {
