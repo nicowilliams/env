@@ -1,0 +1,1135 @@
+
+    alias ngs="java -server -classpath /usr/share/java/nailgun-0.7.1.jar:/usr/share/java/saxonb.jar com.martiansoftware.nailgun.NGServer 12345"
+    alias realias=". /home/nico/.kshaliases"
+    alias valias="\${EDITOR:-vi} /home/nico/.kshaliases"
+    alias rekshrc=". /home/nico/.kshrc.user"
+    alias rekshcd=". /home/nico/.kshcd"
+    alias vi="vim -X"
+    alias vim="vim -X"
+    alias gitb="git branch -a"
+    alias gitbl="git branch"
+    alias gitba="git branch -a"
+    alias gitd="git diff"
+    alias gitf="git format-patch master.."
+    alias gitfs="git format-patch --stdout  master.."
+    alias gitdm="git diff master.."
+    alias gits="git status -uno"
+
+    #alias gita="git add -uv"
+    function gita {
+	# Call git add with -uv for non-file arguments, w/o -u for file
+	# arguments
+	typeset opts arg
+	typeset -a notfiles
+
+	# Gather options
+	while [[ "$1" = -* ]]; do
+	    opts="$opts $1"
+	    shift
+	done
+
+	if (($#)); then
+	    # Call git add -v for each file argument
+	    for arg in "$@"; do
+		if [[ -f "$arg" ]]; then
+		    git add -v $opts "$arg"
+		    continue
+		fi
+		notfiles[${#notfiles[@]}]=$arg
+	    done
+	    # Call git add -uv for all non-file (i.e., directory) arguments
+	    ((${#notfiles[@]})) && git add -uv "${notfiles[@]}"
+	    return $?
+	fi
+	# No arguments, so just call git add -uv
+	git add -uv $opts
+    }
+
+    function which_vcs {
+        # Fast path: we're already at the top-level directory
+        if [[ -d "${1:-$PWD}/.git" ]]; then
+            printf "git\n"
+            return
+        elif [[ -d "${1:-$PWD}/.hg" ]]; then
+            printf "hg\n"
+            return
+        elif [[ -f "${1:-$PWD}/_FOSSIL_" ]]; then
+            printf "fossil\n"
+            return
+        fi
+        # Slow path: exec tools
+        (
+            cd "${1:-$PWD}" || return
+            if git rev-parse --show-toplevel >/dev/null 2>&1; then
+                printf "git\n"
+                return
+            elif hg root >/dev/null 2>&1; then
+                printf "hg\n"
+                return
+            elif fossil status >/dev/null 2>&1; then
+                printf "fossil\n"
+                return
+            fi
+        )
+    }
+
+    function vcs_branch {
+        if (($# == 0)); then
+            set -- $(which_vcs)
+        fi
+        if (($# == 0)); then
+            return
+        fi
+        vcs_branch_$1
+    }
+
+    function vcs_branch_git {
+        git branch 2>/dev/null|grep '^\*'|sed 's/^\*.//'
+    }
+
+    function vcs_branch_hg {
+        hg branch 2>/dev/null
+    }
+
+    function vcs_branch_fossil {
+        fossil branch 2>/dev/null|grep '^\*'|sed 's/^\*.//'
+    }
+
+    function vcs_top {
+        if (($# == 1)); then
+            vcs_top_$1
+            return
+        fi
+        vcs_top_git || vcs_top_hg || vcs_top_fossil
+    }
+
+    function vcs_top_git {
+        git rev-parse --show-toplevel 2>/dev/null
+    }
+
+    function vcs_top_hg {
+        hg root 2>/dev/null
+    }
+
+    function vcs_top_fossil {
+        fossil status 2>/dev/null|grep ^local-root:|awk '{print $2}'
+    }
+
+    function vcs_dirty_count {
+        if (($# == 1)); then
+            vcs_dirty_count_$1
+            return
+        fi
+        vcs_dirty_count_git || vcs_dirty_count_hg || vcs_dirty_count_fossil || (printf "-\n"; exit 1)
+    }
+
+    function vcs_dirty_count_git {
+        git status -suno 2>/dev/null|wc -l
+    }
+
+    function vcs_dirty_count_hg {
+        hg status|grep -v '^[?]'|wc -l
+    }
+
+    function vcs_dirty_count_fossil {
+        fossil status 2>/dev/null|grep ^EDITED|wc -l
+    }
+
+    # Output PS1 value in an SCM-aware and useful way
+    function vcs_ps1 {
+        typeset vcs top branch
+        typeset c p t u
+        typeset R="\033[0;31m" Y="\033[0;33m" G="\033[0;32m"
+        typeset B="\033[0;34m" N="\033[0m" 
+
+        u=${USER:-${LOGNAME:-$(/usr/bin/whoami)}}
+        vcs=$(which_vcs)
+
+        # Not in an SCM?
+        if [[ -z "$vcs" ]]; then
+            if [[ "$u" = root ]]; then
+                printf ": %s${R}#${N}; \n" "${HN%%.*}[!] "
+            else
+                printf ": %s%%; \n" "${HN%%.*}[!] "
+            fi
+            return
+        fi
+
+        top=$(vcs_top $vcs)
+        branch=$(vcs_branch $vcs)
+        m=$(vcs_dirty_count $vcs)
+
+        # Use the basename of the top-level as the workspace name and
+        # work out an abbreviation of $PWD
+        t=${top%/}
+        if [[ "$PWD" = $t ]]; then
+            p=TOP
+        else
+            p=TOP/.../${PWD##*/}
+        fi
+        t="${t##*/}"
+
+        # Output SCM:top-level-basename[branch]:path-abbrev[dirty-count:cmdnum]%
+        if [[ "$u" = root ]]; then
+            printf ": ${R}%s${N}:${Y}%s${N}[${G}%s${N}]:%s[%s:%s]${R}#${N}; \n" \
+                "$vcs" "$t" "${branch}" "$p" "$m" '!'
+        else
+            printf ": ${R}%s${N}:${Y}%s${N}[${G}%s${N}]:%s[%s:%s]%%; \n" \
+                "$vcs" "$t" "${branch}" "$p" "$m" '!'
+        fi
+    }
+
+    function libe {
+	typeset diffs
+
+	if [[ ! -d .git && ! -f lib/libedit/aclocal.m4 && ! -f lib/libedit/aclocal.m4- ]]; then
+	    printf "Wrong CWD?\n"
+	    return 1
+	fi
+	(( diffs=$(git diff lib/libedit/aclocal.m4 | wc -l) ))
+	if ((diffs)); then
+	    cp lib/libedit/aclocal.m4 lib/libedit/aclocal.m4-
+	    git checkout -- lib/libedit/aclocal.m4
+	    printf "Ready to pull\n"
+	elif [[ -f lib/libedit/aclocal.m4- ]]; then
+	    cp lib/libedit/aclocal.m4- lib/libedit/aclocal.m4
+	    (( diffs=$(git diff lib/libedit/aclocal.m4 | wc -l) ))
+	    if ((diffs)); then
+		printf "Ready to build\n"
+	    else
+		rm lib/libedit/aclocal.m4-
+		printf "Must re-./configure\n"
+	    fi
+	else
+	    printf "Must re-./configure\n"
+	fi
+    }
+
+    wget=wget
+
+    alias vbsetuuid='VBoxManage internalcommands setvdiuuid'
+
+    bzflag () {
+	#/opt/csw/bin/bzflag -view normal -m -window -d -no3dfx -multisample "$@"
+	nice -n -1 ppriv -s i=none,file_read,file_write,net_access -e $HOME/sw/bin/bzflag -window "$@"
+    }
+
+    alias l='ls -F'
+    alias L='ls -LF'
+    alias la='ls -Fa'
+    alias lr='ls -FR'
+    alias ll='ls -l'
+    alias lla='ls -la'
+    alias llr='ls -lR'
+    alias llra='ls -lRa'
+
+    [[ -x ~/sw/bin/mutt ]] && sparc && alias mutt=~/sw/bin/mutt
+
+    rfcsearch () {
+	typeset arg f
+	f=$(mktemp /tmp/rfcsearch-XXXX.html)
+	arg='search_doc=search_all&match_method=entire&abstract=absoff&keywords=keyoff&sort_method=newer&num=100&format=http&searchwords='
+	while (($#)); do
+	    arg="${arg}${1}"
+	    (($# > 1)) && arg="${arg}+"
+	    shift
+	done
+	wget -O "$f" --post-data "$arg" http://www.rfc-editor.org/cgi-bin/rfcsearch.pl 1>&2
+	elinks --dump "$f" | grep rfcdoctype.pl | \
+	    sed -e 's/^.*[?]//' -e 's/\<loc=//' -e 's/\<letsgo=//' -e 's/\<type=.*$//' | \
+	    tr '&' ' '
+	rm "$f"
+    }
+
+    getrfcs () {
+	(
+	cd ~/ietf/RFCs || exit 0
+	for i in "$@"
+	do
+	    [[ "$i" = +([0-9]) ]] && i="rfc${i}.txt"
+	    [[ "$i" = rfc* && "$i" != *.txt ]] && i="${i}.txt"
+	    if [[ -f $i ]]
+	    then
+		print -u2 "$i already in ~/ietf/RFCs"
+		continue
+	    fi
+	    #$wget ftp://ftp.rfc-editor.org/in-notes/$i
+	    $wget http://www.rfc-editor.org/rfc/$i
+	done
+	)
+    }
+
+    rfc () {
+	typeset rfc_args index arg rfc
+	integer index
+	set -A rfc_args --
+	for i in "$@"
+	do
+	    index=${#rfc_args[@]}
+	    rfc_args[$index]=$i
+	    [[ "$i" = *rfc* ]] || rfc_args[$index]="rfc${i}"
+	    [[ "$i" = *rfc* ]] || rfc_args[$index]="${rfc_args[$index]}.txt"
+	done
+	if [[ -t 1 ]]
+	then
+	    (cd ~/ietf/RFCs && eval less "${rfc_args[@]}")
+	else
+	    (cd ~/ietf/RFCs && eval ls "${rfc_args[@]}")|while read rfc
+	    do
+		print ~/ietf/RFCs/$rfc
+	    done
+	fi
+    }
+
+    rfcidx () {
+	(cd ~/ietf/RFCs && grep "^RFC" rfc*|uniq| \
+	    sed -e 's/^[^:]://' > .rfcidx)
+    }
+
+    rfcs () {
+	typeset rfc_args index arg rfc
+	integer index
+	set -A rfc_args --
+	for i in "$@"
+	do
+	    set -A rfc_args -- "${rfc_args[@]}" \
+		$(grep -i "$i" ~/ietf/RFCs/.rfcidx|awk '{print $2}'|sed 's/^\(.*\)$/rfc\1.txt/')
+	done
+	if [[ -t 1 ]]
+	then
+	    (cd ~/ietf/RFCs && eval less "${rfc_args[@]}")
+	else
+	    (cd ~/ietf/RFCs && eval ls "${rfc_args[@]}")|while read rfc
+	    do
+		print ~/ietf/RFCs/$rfc
+	    done
+	fi
+    }
+
+    ids () {
+	typeset i ids_args id
+	set -A ids_args --
+	for i in "$@"
+	do
+	    [[ "X$i" != X\** ]] && i="*${i}"
+	    [[ "X$i" != X*\* ]] && i="${i}*"
+	    ids_args[${#ids_args[@]}]="$i"
+	done
+	if [[ -t 1 ]]
+	then
+	    (cd ~/ietf/Drafts ; eval less $(ls ${ids_args[@]} | sort -r))
+	else
+	    (cd ~/ietf/Drafts ; eval ls "${ids_args[@]}")|sort -r|while read id
+	    do
+		print ~/ietf/Drafts/$id
+	    done
+	fi
+    }
+
+    getids () {
+	(
+	cd ~/ietf/Drafts || exit 0
+	for i in "$@"
+	do
+	    [[ "$i" != draft-* ]] && i="draft-${i}"
+	    [[ "$i" != *.txt ]] && i="${i}.txt"
+	    if [[ -f $i ]]
+	    then
+		print -u2 "$i already in ~/ietf/Drafts"
+		continue
+	    fi
+	    $wget http://www.ietf.org/internet-drafts/$i
+	done
+	)
+    }
+
+    fmoz () {
+	(
+	    ps -ef | grep \[m]ozilla-bin | grep \[n]w141 | \ 
+		tee /dev/fd/2 | read j pid rest
+	    print -- truss -fp $pid
+	    print -- kill $pid
+	) 2>&1
+	return $?
+    }
+
+    # A little wrapper around find that filters out all sorts of version
+    # control systems' directories.
+    #
+    # Usage is same as find, but note that -print always gets tacked on.
+    nsfind  () {
+        typeset dargs
+        set -A dargs
+        while [[ $# -gt 0 ]]
+        do 
+            [[ "$1" = -* || "$1" = \! ]] && break
+            dargs[${#dargs[@]}]="$1"
+            shift
+        done
+        [[ ${#dargs[@]} -eq 0 ]] && dargs[${#dargs[@]}]=.
+        #[[ $# -eq 0 ]] && set -- -print
+        [[ "$1" = -- ]] && shift
+        if [[ $# -eq 0 ]]
+        then
+            find "${dargs[@]}" \( \( -name SCCS -o -name CVS -o -name .hg -o -name .git \) -type d -prune \) -o -print
+	    return $?
+        else
+            find "${dargs[@]}" \( \( -name SCCS -o -name CVS -o -name .hg -o -name .git \) -type d -prune \) -o \( \( "$@" \) -print \)
+	    return $?
+        fi
+    }
+
+    dates () {
+	typeset tz m tabs tzs
+	m=0
+	tzs="US/Pacific US/Mountain US/Central US/Eastern GMT GB Eire Europe/Amsterdam Asia/Singapore Asia/Tokyo"
+	for tz in $tzs
+	do
+	    [[ ${#tz} -gt $m ]] && m=${#tz}
+	done
+	for tz in $tzs
+	do
+	    print -n "$tz:	"
+	    tabs=$(( ($m / 8) - (${#tz} / 8) )) 
+	    while [[ $tabs -gt 0 ]]
+	    do
+		print -n "	"
+		tabs=$((tabs-1))
+	    done
+	    print "$(TZ=$tz date)"
+	done
+    }
+
+    pathItems () {
+	typeset IFS OIFS
+
+	OIFS="$IFS"
+	IFS=:
+	eval print \$${1:-PATH}
+	IFS="$OIFS"
+    }
+    alias pitems=pathItems
+
+    removeGlobFromXPATH () {
+	typeset pathvar pathcomp pathcopy newpath
+
+	pathvar="$1"
+	shift
+
+	eval pathcopy="\$$pathvar"
+	newpath=''
+
+	while [[ -n "${pathcopy}" ]]
+	do
+	    pathcomp="${pathcopy%%:*}"
+	    pathcopy="${pathcopy#*:}"
+	    eval "[[ \"${pathcomp}\" = $1 ]]" || newpath="${newpath}:${pathcomp}"
+	    [[ "${pathcopy}" = "${pathcomp}" ]] && break
+	done
+	newpath="${newpath##:}"
+	eval "${pathvar}=\"${newpath}\""
+	return 0
+    }
+
+    removeFromXPATH () {
+	typeset pathvar pathcomp pathcopy newpath
+
+	pathvar="$1"
+	shift
+
+	eval pathcopy="\$$pathvar"
+	newpath=''
+
+	while [[ -n "${pathcopy}" ]]
+	do
+	    pathcomp="${pathcopy%%:*}"
+	    pathcopy="${pathcopy#*:}"
+	    eval [[ \"${pathcomp}\" = "$1" ]] || newpath="${newpath}:${pathcomp}"
+	    [[ "${pathcopy}" = "${pathcomp}" ]] && break
+	done
+	newpath="${newpath##:}"
+	eval "${pathvar}=\"${newpath}\""
+	return 0
+    }
+
+    maybeAdd2XPATH () {
+	typeset pathvar pathcomp pathcopy
+
+	pathvar="$1"
+	shift
+
+	eval pathcopy="\$$pathvar"
+	while [[ -n "${pathcopy}" ]]
+	do
+	    pathcomp="${pathcopy%%:*}"
+	    pathcopy="${pathcopy#*:}"
+	    [[ "$1" = "${pathcomp}" ]] && return 0
+	    [[ "${pathcopy}" = "${pathcomp}" ]] && break
+	done
+	[[ "$1" = "$pathcomp" ]] && return 0
+	if [[ $# -gt 1 ]]
+	then
+	    if [[ "$2" = left ]]
+	    then
+		eval "${pathvar}=\"$1:\$${pathvar}\""
+	    elif [[ "$2" = right ]]
+	    then
+		eval "${pathvar}=\"\$${pathvar}:$1\""
+	    else
+		eval "${pathvar}=\"\$${pathvar}:$1\""
+	    fi
+	else
+	    eval "${pathvar}=\"\$${pathvar}:$1\""
+	fi
+	return 0
+    }
+
+    fsgen () {
+        typeset fname filter
+        fname=$1
+        shift
+        filter=$1
+        shift
+        eval "function $fname  {
+            typeset fargs
+            set -A fargs --
+            while [[ \$# -gt 1 && \"\$1\" != -* ]]
+            do 
+                fargs[\${#fargs[@]}]=\"\$1\"
+                shift
+            done
+            nsfind \"\${fargs[@]}\" $*  -print | xargs $filter \"\$@\"
+}
+"
+    }
+
+
+    fsg () {
+	typeset fargs
+	set -A fargs --
+	while [[ $# -gt 1 && "$1" != -* ]]
+	do
+	    fargs[${#fargs[@]}]="$1"
+	    shift
+	done
+	#find "${fargs[@]}" \( -name SCCS -type d -prune \) -o  \( \( -name \*.\[chxyl\] -o -name \*.cc \) -print \) | grep -v /SCCS/ | xargs grep "$@"
+	nsfind "${fargs[@]}" \( -name \*.\[chxysil\] -o -name \*.cc -o -name \*.[ch]pp -o -name \*.java -o -name \*.p\[lm\] \) | xargs grep "$@"
+    }
+
+    fseg () {
+	typeset fargs
+	set -A fargs --
+	while [[ $# -gt 1 && "$1" != -? && "$1" != "--" ]]
+	do
+	    fargs[${#fargs[@]}]="$1"
+	    shift
+	done
+	nsfind "${fargs[@]}" \( -name \*.\[chxyl\] -o -name \*.cc -o -name \*.[ch]pp -o -name \*.java \) | xargs egrep "$@"
+    }
+
+    fmg () {
+	typeset fargs
+	set -A fargs --
+	while [[ $# -gt 1 && "$1" != -* ]]
+	do
+	    fargs[${#fargs[@]}]="$1"
+	    shift
+	done
+	nsfind "${fargs[@]}" -name \*\[Mm\]akefile\* -o -name \[Cc\]onfigure -o \( -name \*.in -a \! -name cscope\* \) -o -name \*.am -o -name \*.ac | grep -v /SCCS/ | xargs grep "$@"
+    }
+
+    femg () {
+	typeset fargs
+	set -A fargs --
+	while [[ $# -gt 1 && "$1" != -? && "$1" != "--" ]]
+	do
+	    fargs[${#fargs[@]}]="$1"
+	    shift
+	done
+	find "${fargs[@]}" -name \[Mm\]akefile -o -name \[Cc\]onfigure -o -name \*.in -o -name \*.am -o \*.ac | grep -v /SCCS/ | xargs egrep "$@"
+    }
+
+    mman () {
+	if [[ -t 1 ]]
+	then
+		nroff -man "$@"|less
+	else
+		nroff -man "$@"
+	fi
+    }
+
+	alias	lld='ls -Fld'
+	alias	zcat='gunzip -c'
+
+	alias	pd=dirs
+	alias	po=popd
+	alias	pp=pushd
+
+	nms ()
+	{
+		tbl $* | nroff -ms | less
+	}
+	tms ()
+	{
+		tbl $* | nroff -ms > troff.output &
+	}
+	lindex () {
+		typeset var varexp index value
+		[[ $# -le 2 ]] && return 1
+		var="$1" ; shift
+		if [[ "$1" = end ]]
+		then
+			varexp='index=${#'"$var"'[@]}'
+			eval $varexp
+			index=$((index-1))
+		else
+			index="$1"
+		fi
+		varexp='value="${'"$var"'['"$index"']}"'
+		eval $varexp
+		print -r "$value"
+	}
+	lappend () {
+		typeset var varexp values
+		var="$1" ; shift
+		varexp='"${'"$var"'[@]}"'
+		eval set -A values -- "$varexp"
+		set -A "$var" -- "${values[@]}" "$@"
+	}
+	lvarpop () {
+		typeset var varexp last
+		var="$1" ; shift
+		varexp='last=${#'"$var"'[@]}'
+		eval $varexp
+		last=$((last-1))
+		varexp="$var"'['$last']'
+		eval print "$varexp"
+		eval unset "$varexp"
+	}
+
+	schmod () {
+		[[ $# -ge 3 ]] || {
+			print "Usage: schmod <dir perms> <file perms> <directory> ..."
+			return 1
+		}
+		typeset dperms fperms dir status
+		dperms="$1"
+		fperms="$2"
+		shift 2
+		status=0
+		for dir in "$@"
+		do
+			find "$dir" -type d -print|xargs chmod "$dperms"
+			status=$(($status+$?))
+			find "$dir" -type f -print|xargs chmod "$fperms"
+			status=$(($status+$?))
+		done
+		return $status
+	}
+
+	procenv ()
+	{
+		typeset OIFS in out var val
+		in="$1"
+		out="$2"
+		shift 2
+		OIFS="$IFS"
+		IFS="="
+		while read line
+		do
+			IFS="="
+			set -- $line
+			var=$1
+			shift 1
+			val="$*"
+			IFS="$OIFS"
+			print -- "${var}=\"${val}\""
+			IFS="="
+			print "export $var"
+		done < $in > $out
+	}
+
+    rxscreen ()
+    {
+	typeset rxvt
+	rxvt=$(whence rxvt)
+	if [[ -n "$rxvt" ]]
+	then
+	    args="-rv -sr -font 9x15 -sl 8192 -geometry"
+	    xterm="$rxvt"
+	else
+	    xscreen "$@"
+	    return $?
+	fi
+	if [[ "$1" = n ]]
+	then
+	    "$rxvt" -backspacekey '' -deletekey '' $args ${2:-80x40} -e env HISTFILE= screen &
+	    return 0
+	fi
+	typeset screen_str state
+	screen -ls|grep pts|head -$1 | tail -1|read screen_str state
+	if [[ "$state" = ?Detached? ]]
+	then
+	    $rxvt -T "xscreen$1" -backspacekey '' -deletekey '' $args ${2:-80x40} -e screen -r $screen_str &
+	else
+	    $rxvt -T "xscreen$1" -backspacekey '' -deletekey '' $args ${2:-80x40} -e screen -d -r $screen_str &
+	fi
+    }
+
+    xscreen ()
+    {
+	typeset xterm args arg1 arg2
+	xterm=$(whence xterm)
+	: "${xterm:=/usr/openwin/bin/xterm}"
+	args="-rv -sb +sf -sl 8192 -geo"
+
+	arg1=n
+	arg2=80x40
+	if [[ "$#" -gt 0 ]]
+	then
+	    arg1="$1"
+	    shift
+	    if [[ $# -gt 0 ]]
+	    then
+		arg2="$1"
+		shift
+	    fi
+	fi
+
+	[[ "$arg2" = - ]] && arg2=110x44
+
+	if [[ "$arg1" = n ]]
+	then
+	    HISTFILE= "$xterm" $args ${arg2:-80x40} -e screen "$@" &
+	    return 0
+	elif [[ "$arg1" = s ]]
+	then
+	    (
+	    if [[ -d /ws/on10-clone-aus/usr/src/. ]]
+	    then
+		sunwspro -aus ; cd /ws/on10-clone-aus/usr/src ;
+	    else
+		sunwspro ; cd /ws/on10-clone/usr/src ;
+	    fi
+	    ENV=/home/nw141292/.kshrc.user EDITOR="svim" "$xterm" \
+		$args ${arg2:-110x34} -e screen cscope.ksh &
+	    )
+	    return 0
+	fi
+
+	typeset screen_str state
+	screen -ls|grep pts|head -$arg1 | tail -1|read screen_str state
+	if [[ "$state" = ?Detached? ]]
+	then
+	    $xterm -T "xscreen$arg1" $args ${arg2:-80x40} -e screen -r $screen_str "$@" &
+	else
+	    $xterm -T "xscreen$arg1" $args ${arg2:-80x40} -e screen -d -r $screen_str "$@" &
+	fi
+    }
+
+	rscreen_alias ()
+	{
+		typeset screen_str state arg1
+		arg1=$1
+		shift
+		screen -ls|grep pts|head -$arg1 | tail -1|read screen_str state
+		if [[ "$state" = ?Detached? ]]
+		then
+			screen -r $screen_str "$@"
+		else
+			screen -d -r $screen_str "$@"
+		fi
+	}
+
+
+
+	mfxg () {
+		typeset pat
+		pat="$1"
+		shift
+		find "$@" |xargs grep "$pat" /dev/null
+	}
+
+	mfsg () {
+		typeset d
+		d="$1"
+		shift
+		find "$d" -name \*.\[ch\] | xargs grep "$@" /dev/null
+	}
+
+	mfig () {
+		typeset d
+		d="$1"
+		shift
+		find "$d" -name \*.in | xargs grep "$@" /dev/null
+	}
+
+	mfmg () {
+		typeset d
+		d="$1"
+		shift
+		find "$d" -name Makefile | xargs grep "$@" /dev/null
+	}
+
+	mfgg () {
+		[[ $# -gt 0 ]] || return 1
+		typeset fargs
+		set -A fargs -- "$1"
+		shift
+		while [[ $# -gt 0 && "$1" != -- ]]
+		do
+			fargs[${#fargs[@]}]="$1"
+			shift
+		done
+		[[ $# -gt 0 && "$1" = -- ]] && shift
+		[[ $# -gt 0 ]] || return 1
+		[[ ${#fargs[@]} -gt 1 ]] || set -A fargs -- "${fargs[@]}" \( -name \*.\[ch\] -o -name Makefile -o -name \*.in \) -print
+		find "${fargs[@]}"| xargs grep "$@" /dev/null
+	}
+
+	#xtitle () {
+	#	print -n "]0;${1}"
+	#}
+
+    ilynx () {
+	typeset j w hurl furl
+
+	w=~/.wgetrc
+	[[ -f "~/.wgetrc" ]] || w=/home/nw141292/.wgetrc
+	grep http_proxy "$w"|read j j hurl
+	grep ftp_proxy "$w"|read j j furl
+	eval http_proxy=\"$hurl\" ftp_proxy=\"$furl\" lynx \"\$@\"
+    }
+
+    ietf_mget () {
+	typeset ietf_arch which usage l d m y current merge newmail this_year this_month lastc
+	usage="Usage: ietf-mget [-nowget] [-merge] [-all|-current] <list> [<dir>]
+	Fetches e-mail archives of the named IETF mailing list. When fetching the
+	current [month's] mbox only new e-mail is appended to the local copy of
+	the same mbox, thus preserving the 'Status:' header as set by your MUA
+	(i.e., read/replied status)."
+
+	ietf_arch="ftp://ftp.ietf.org/ietf-mail-archive"
+	this_year=$(date +%Y)
+	this_month=$(date +%m)
+	wget=wget
+	merge=/bin/false
+	which=current
+	current=current
+	while [[ $# -gt 0 && "$1" = -* ]]
+	do
+	    case "$1" in
+		-all)
+		    which=all
+		    ;;
+		-current)
+		    which=current
+		    ;;
+		-merge)
+		    merge=:
+		    current=all
+		    ;;
+		-nowget)
+		    wget=:
+		    ;;
+		-*) print -u2 "$usage"
+		    return 1
+		    ;;
+	    esac
+	    shift
+	done
+
+	[[ $# -gt 0 ]] || {
+	    print -u2 "$usage"
+	    return 1
+	}
+
+	l="$1"
+	d="${2:-$l}"
+
+	if [[ -f "$HOME/ietf/$d/all" ]]
+	then
+	    which=current
+	    current=all
+	fi
+
+	mkdir -p "$HOME/ietf/$d/tmp" || return 8
+	[[ -d "$HOME/ietf/$d/tmp" ]] || return 9
+	if [[ "$which" = all ]]
+	then
+	    # Get all mboxes in the archive
+	    (
+		cd "$HOME/ietf/$d"
+		[[ -f all ]] && exit 0
+		for y in 1997 1998 1999 2000 2001 2002
+		do
+		    for m in 01 02 03 04 05 06 07 08 09 10 11 12
+		    do
+			[[ "$y-$m" = "${this_year}-${this_month}" ]] && break
+			[[ -f "$y-$m.mail" ]] && continue
+			($wget "$ietf_arch/$l/$y-$m.mail" || $wget "$ietf_arch/$l/$y-$m") && \
+			    print "$y-$m" > .lastmonthly
+			touch "$y-$m.mail"
+		    done
+		done
+		if [[ ! -f current ]]
+		then
+		    $wget "$ietf_arch/$l/current" && \
+			print "${this_year}-${this_month}" > .lastcurrent
+		fi
+		if $merge
+		then
+		    cat [12]* current > all
+		fi
+	    )
+	fi
+
+	# Get current month's mbox
+	(
+	    cd "$HOME/ietf/$d" || exit 2
+
+	    # Check for month/current rollover
+	    current_name=current
+	    lastc=""
+	    if [[ -s .lastcurrent ]]
+	    then
+		read lastc < .lastcurrent
+	    fi
+	    if [[ -n "$lastc" && "$lastc" != "${this_year}-${this_month}" ]]
+	    then
+		current_name="$lastc.mail"
+		cat <<EOF
+    WARNING: At least one month boundary has been crossed wince your
+             last update. Please rename the "current" mbox in
+	     $HOME/ietf/$d/ accordingly.
+EOF
+	    fi
+	    rm -f .lastcurrent
+
+	    cd "$HOME/ietf/$d/tmp" || exit 2
+	    [[ $wget = wget ]] && rm -f "$current_name"
+	    $wget -O current "$ietf_arch/$l/$current_name" || exit 3
+	    [[ -f .lastcurrent ]] || print "${this_year}-${this_month}" > ../.lastcurrent
+
+
+	    # Append ONLY new messages to the local 'current' mbox
+	    # NOTE: no month rollowver is done here.
+	    newmail=/bin/false
+	    touch ../$current_name current current-
+	    if cmp current current- > /dev/null 2>&1
+	    then
+		:
+	    else
+		diff -b "../$current_name" current | grep -v '^<' | while read -r line
+		do
+		    [[ "$line" != \>* ]] && {
+			#print "Resetting output to append: $line" 1>&2
+			newmail=/bin/false
+			exec > b || exit 5
+			continue
+		    }
+		    if [[ "${#line}" -ge 2 ]]
+		    then
+			print -r -- "${line#??}"
+			newmail=:
+		    else
+			print ''
+		    fi
+		done > b || exit 5
+	    fi
+	    cd ..
+	    if $newmail
+	    then
+		cat "$current_name" ./tmp/b > "new-$current_name"
+		print "New mail in ~/ietf/$l/$current_name!"
+		mv $current_name ${current}-
+		mv new-$current_name $current_name
+	    else
+		print "No new mail in ~/ietf/$l/$current_name"
+	    fi
+	    #rm -f tmp/b tmp/current
+
+	    if [[ "$current_name" != current ]]
+	    then
+		rm -f .lastcurrent
+		rm -f tmp/current* tmp/b
+	    fi
+	)
+	return 0
+    }
+
+
+netpath ()
+{
+	typeset h i j p u uf h hf
+	[[ $# -eq 0 ]] && {
+		print -u2 "Usage: netpath <path> ..."
+		return 1
+	}
+	u=$(/bin/hostname)
+	if [[ -f /etc/resolv.conf ]]
+	then
+		nslookup "$u"|grep "^Name:"|read j uf
+	fi
+	for i in "$@"
+	do
+		if [[ "$i" = /net/+([!/])/* ]]
+		then
+			p=${i#/net/}
+			h=${p%%/*}
+			p=${p#*/}
+			nslookup "$h"|grep "^Name:"|read j hf
+			print "$i"
+			print "file:///$i"
+			print "http://$h/$p"
+			print /net/$hf/$p
+			print "file:///net/$hf/$p"
+			print "http://$hf/$p"
+		elif [[ "$i" = /net/* ]]
+		then
+			print "$i"
+		elif [[ "$i" = +([!/]):/* ]]
+		then
+			h=${i%%:*}
+			p=${i#*:/}
+			nslookup "$h"|grep "^Name:"|read j hf
+			print "/net/$h/$p"
+			print "file:///$h/$p"
+			print "http://$h/$p"
+			print "/net/$hf/$p"
+			print "file:///$hf/$p"
+			print "http://$hf/$p"
+		elif [[ "$i" = /* ]]
+		then
+			print "/net/$u/${i#/}"
+			print "file:///$u/${i#/}"
+			print "http://$u/${i#/}"
+			print "/net/$uf/${i#/}"
+			print "file:///$uf/${i#/}"
+			print "http://$uf/${i#/}"
+		else
+			print "/net/${u}$(/bin/pwd)/${i}"
+			print "file:///${u}$(/bin/pwd)/${i}"
+			print "http://${u}$(/bin/pwd)/${i}"
+			print "/net/${uf}$(/bin/pwd)/${i}"
+			print "file:///${uf}$(/bin/pwd)/${i}"
+			print "http://${uf}$(/bin/pwd)/${i}"
+		fi
+		print
+	done
+}
+function fqdn
+{
+    typeset line word rest junk name
+    nslookup "$1"|while read line
+    do
+	if [[ "$line" = Name:* ]]
+	then
+	    while read word rest
+	    do
+		if [[ "$word" = Address: ]]
+		then
+		    nslookup "$rest"|grep ^Name:|read junk name
+		    print -- "$name"
+		    break
+		elif [[ "$word" = Addresses: ]]
+		then
+		    for address in $rest
+		    do
+			nslookup "${address%,*}"|grep ^Name:|read junk name
+			print -- "$name"
+		    done|sort -u
+		fi
+		break
+	    done
+	fi
+    done|tr '[A-Z]' '[a-z]'
+}
+function fqdn_domain
+{
+    typeset name dname
+    fqdn "$1"|while read name
+    do
+	eval "dname=\${name#${1}}"
+	print -- "$dname"
+    done
+}
+function fool
+{
+	typeset -i i j num
+	typeset nums rslt
+	rslt=""
+	set -A nums -- "$@"
+	i=0
+	while [[ $i -lt ${#nums[@]} ]]
+	do
+		j=i
+		while [[ $j -lt ${#nums[@]} ]]
+		do
+			[[ $((j+1)) -eq ${#nums[@]} ]] && break
+
+			if [[ ${nums[$((j+1))]} -eq $(( ${nums[$j]} + 1)) ]]
+			then
+				j=j+1
+			else
+				break
+			fi
+		done
+		if [[ $i -eq $j ]]
+		then
+			rslt="$rslt,${nums[$i]}"
+			i=i+1
+		elif [[ $((i+1)) -eq $j ]]
+		then
+			rslt="$rslt,${nums[$i]},${nums[$j]}"
+			i=j+1
+		else
+			rslt="$rslt,${nums[$i]}-${nums[$j]}"
+			i=j+1
+		fi
+	done
+	print ${rslt#,}
+}
+
+function cdws
+{
+    sunwspro -aus; whence ws > /dev/null || sunwspro
+    for i in iquad iquad.central
+    do
+	if [[ -d /net/$i/pool/nico/ws ]]
+	then
+	    cdto /net/$i/pool/nico/ws
+	    return 0
+	fi
+    done
+    return 1
+}
+
+function oncsc
+
+function ctptree
+{
+    ps -o pid,ppid,pgid,ctid,args -p \
+	$(print $(ptree "${1:-$$}"|awk '{print $1}')|sed 's/ /,/g')
+}
+
+hex2ascii () {
+	typeset h s s1
+	typeset -i c
+	for i in "$@"
+	do
+	    s=$1
+	    shift
+	    c=8#0
+	    while [[ ${#s} -gt 1 ]]
+	    do
+		    s1=${s#??}
+		    h=${s%$s1}
+		    s=$s1
+		    c=$((16#$h))
+		    print -n "\0${c#8?}"
+	    done
+	    print -n " "
+	done
+	print
+}
