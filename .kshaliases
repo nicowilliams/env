@@ -1,4 +1,5 @@
 
+    alias ngs="java -server -classpath /usr/share/java/nailgun-0.7.1.jar:/usr/share/java/saxonb.jar com.martiansoftware.nailgun.NGServer 12345"
     alias realias=". /home/nico/.kshaliases"
     alias valias="\${EDITOR:-vi} /home/nico/.kshaliases"
     alias rekshrc=". /home/nico/.kshrc.user"
@@ -52,7 +53,7 @@
         elif [[ -d "${1:-$PWD}/.hg" ]]; then
             printf "hg\n"
             return
-        elif [[ -d "${1:-$PWD}/_FOSSIL_" ]]; then
+        elif [[ -f "${1:-$PWD}/_FOSSIL_" ]]; then
             printf "fossil\n"
             return
         fi
@@ -483,161 +484,6 @@
 	return 0
     }
 
-    sunwspro () {
-	typeset isa ontype onsuffix j
-
-	isainfo|read isa j
-	# Remove sfw (and don't put it back)
-	#removeFromXPATH PATH /opt/sfw/bin
-	#removeFromXPATH PATH /user/sfw/bin
-	#removeFromXPATH MANPATH /opt/sfw/man
-	#removeFromXPATH MANPATH /usr/sfw/man
-	#removeFromXPATH LD_LIBRARY_PATH /opt/sfw/lib
-	#removeFromXPATH LD_LIBRARY_PATH /usr/sfw/lib
-	# Remove teamware/SUNWspro...
-	removeFromXPATH PATH "*/onbld/bin"
-	removeFromXPATH PATH "*/onbld/bin/$isa"
-	removeFromXPATH PATH "*/teamware/bin"
-	removeFromXPATH PATH "*/ParallelMake/bin"
-	removeFromXPATH PATH "*/SUNWspro/bin"
-	removeFromXPATH PATH "*/SUNWspro/*/bin"
-	removeFromXPATH MANPATH "*/onbld/man"
-	removeFromXPATH MANPATH "*/teamware/man"
-	removeFromXPATH MANPATH "*/ParallelMake/man"
-	removeFromXPATH MANPATH "*/SUNWspro/man"
-	removeFromXPATH MANPATH "*/SUNWspro/*/man"
-
-	unalias wx
-	unset BUILD_TOOLS
-
-	ontype=onnv
-	onsuffix=
-	while [[ -n "$1" ]]
-	do
-		case "$1" in
-		    -*) onsuffix=$1;;
-		    *) ontype=$1;;
-		esac
-		shift
-	done
-
-	maybeAdd2XPATH PATH /opt/clone-tools/bin left
-	maybeAdd2XPATH PATH /ws/${ontype}-tools${onsuffix}/teamware/bin left
-	maybeAdd2XPATH PATH /ws/${ontype}-tools${onsuffix}/onbld/bin left
-	maybeAdd2XPATH PATH /ws/${ontype}-tools${onsuffix}/onbld/bin/$isa left
-	maybeAdd2XPATH PATH /ws/${ontype}-tools${onsuffix}/teamware/ParallelMake/bin left
-	maybeAdd2XPATH PATH /ws/${ontype}-tools${onsuffix}/SUNWspro/SOS10/bin left
-	maybeAdd2XPATH MANPATH /ws/${ontype}-tools${onsuffix}/onbld/man left
-	maybeAdd2XPATH MANPATH /ws/${ontype}-tools${onsuffix}/teamware/man left
-	maybeAdd2XPATH PATH /ws/${ontype}-tools${onsuffix}/SUNWspro/SOS10/man left
-	alias wx=/opt/onbld/bin/wx
-	export BUILD_TOOLS=/ws/${ontype}-tools${onsuffix}
-    }
-
-    nosunwspro () {
-	removeFromXPATH PATH /opt/teamware/bin
-	removeFromXPATH PATH /opt/SUNWspro/bin
-	removeGlobFromXPATH PATH /ws/on10-tools*/teamware/bin
-	removeGlobFromXPATH PATH /ws/on10-tools*/onbld/bin
-	removeFromXPATH MANPATH /opt/teamware/man
-	removeFromXPATH MANPATH /opt/SUNWspro/man
-	removeGlobFromXPATH MANPATH /ws/on10-tools*/onbld/man
-	removeGlobFromXPATH MANPATH /ws/on10-tools*/teamware/man
-    }
-
-    sfw () {
-	# Remove sfw...
-	removeFromXPATH PATH /opt/sfw/bin
-	removeFromXPATH PATH /usr/sfw/bin
-	removeFromXPATH PATH /ws/on10-tools/teamware/bin
-	removeFromXPATH MANPATH /opt/sfw/man
-	removeFromXPATH MANPATH /usr/sfw/man
-	removeFromXPATH MANPATH /ws/on10-tools/teamware/man
-	removeFromXPATH LD_LIBRARY_PATH /opt/sfw/lib
-	removeFromXPATH LD_LIBRARY_PATH /usr/sfw/lib
-	# ...and it it back in front
-	maybeAdd2XPATH PATH /opt/sfw/bin ${1:-left}
-	maybeAdd2XPATH PATH /usr/sfw/bin ${1:-left}
-	maybeAdd2XPATH MANPATH /opt/sfw/man ${1:-left}
-	maybeAdd2XPATH MANPATH /usr/sfw/man ${1:-left}
-	#maybeAdd2XPATH LD_LIBRARY_PATH /opt/sfw/lib ${1:-left}
-	#maybeAdd2XPATH LD_LIBRARY_PATH /usr/sfw/lib ${1:-left}
-    }
-
-    nosfw () {
-	removeFromXPATH PATH /opt/sfw/bin
-	removeFromXPATH PATH /usr/sfw/bin
-	removeFromXPATH PATH /ws/on10-tools/teamware/bin
-	removeFromXPATH MANPATH /opt/sfw/man
-	removeFromXPATH MANPATH /usr/sfw/man
-	removeFromXPATH MANPATH /ws/on10-tools/teamware/man
-	removeFromXPATH LD_LIBRARY_PATH /opt/sfw/lib
-	removeFromXPATH LD_LIBRARY_PATH /usr/sfw/lib
-    }
-
-    spkg () {
-	typeset pkg
-	if [[ ! -d /pkg/v9 && ! -d /pkg/openssh ]] 
-	then
-	    spkg_hard
-	    return $?
-	fi
-	removeGlobFromXPATH PATH \*pkg.eng\*
-	removeGlobFromXPATH MANPATH \*pkg.eng\*
-	removeGlobFromXPATH LD_LIBRARY_PATH \*pkg.eng\*
-	for pkg in v9 X11 gnome-2.0 gnu local 
-	do
-	    removeFromXPATH PATH /pkg/$pkg/bin
-	    removeFromXPATH MANPATH /pkg/$pkg/man
-	    removeFromXPATH LD_LIBRARY_PATH /pkg/$pkg/lib
-	    maybeAdd2XPATH PATH /pkg/$pkg/bin
-	    maybeAdd2XPATH MANPATH /pkg/$pkg/man
-	    #maybeAdd2XPATH LD_LIBRARY_PATH /pkg/$pkg/lib
-	done
-
-	removeFromXPATH PATH /pkg/openssh/bin
-	removeFromXPATH MANPATH /pkg/openssh/man
-	maybeAdd2XPATH PATH /pkg/openssh/bin left
-	maybeAdd2XPATH MANPATH /pkg/openssh/man left
-
-	return 0
-    }
-
-    spkg_hard () {
-	typeset p netpkgeng
-	netpkgeng=/net/pkg.eng/export/pkg.sparc.sunos5
-	for p in $netpkgeng/*/bin
-	do
-	    removeFromXPATH PATH $p
-	    if [[ "$p" = *openssh* ]]
-	    then
-	        maybeAdd2XPATH  PATH $p left
-	    else
-	        maybeAdd2XPATH  PATH $p
-	    fi
-	done
-	for p in $netpkgeng/*/man
-	do
-	    removeFromXPATH MANPATH $p
-	    maybeAdd2XPATH  MANPATH $p
-	done
-	for p in $netpkgeng/*/lib
-	do
-	    removeFromXPATH LD_LIBRARY_PATH $p
-	    #maybeAdd2XPATH  LD_LIBRARY_PATH $p
-	done
-    }
-
-    nospkg () {
-	removeGlobFromXPATH PATH \*pkg.eng\*
-	removeGlobFromXPATH MANPATH \*pkg.eng\*
-	removeGlobFromXPATH LD_LIBRARY_PATH \*pkg.eng\*
-	removeFromXPATH PATH /pkg/\*/bin
-	removeFromXPATH MANPATH /pkg/\*/man
-	removeFromXPATH LD_LIBRARY_PATH /pkg/\*/lib
-    }
-
-
     fsgen () {
         typeset fname filter
         fname=$1
@@ -714,7 +560,6 @@
 
 	alias	lld='ls -Fld'
 	alias	zcat='gunzip -c'
-	alias	c=clear
 
 	alias	pd=dirs
 	alias	po=popd
@@ -1261,58 +1106,11 @@ function cdws
 }
 
 function oncsc
-{
-    sunwspro -aus; whence ws > /dev/null || sunwspro
-    for i in "/ws/on${1:-10}-clone-aus" "/ws/on${1:-10}-clone" "/ws/on${1:-10}-gate" /NONE
-    do
-	[[ -d "$i" ]] && break
-    done
-    [[ "$i" = /NONE ]] && return 1
-    . ws -e "$i"
-    cdinit
-    sed -e "s,^\([0-9]*\) /ws/on[^/]*/,\1 ${i}," ~/.cdls.on${1:-10}.ws|cdrf -
-    cd usr/src
-    EDITOR=${2:-svim} cscope.ksh
-}
 
 function ctptree
 {
     ps -o pid,ppid,pgid,ctid,args -p \
 	$(print $(ptree "${1:-$$}"|awk '{print $1}')|sed 's/ /,/g')
-}
-
-xssh ()
-{
-	xterm -rv -sb -sl 8192 +sf -geo 110x44 -e ssh nw141292@binky.us.oracle.com
-}
-
-sacpaths () {
-    cat <<"EOF"
-/net/sac.sfbay/export/sac/
-/net/sac.sfbay/export/sac/Reports/
-/net/sac.sfbay/export/sac/Reports/arc.html
-/net/sac.sfbay/export/sac/Reports/proj_$ARC.html
-/net/sac.sfbay/export/sac/Reports/stat_*
-/net/sac.sfbay/export/sac/ARC/
-EOF
-}
-
-arcpaths () {
-    sacpaths
-    cat <<"EOF"
-/net/sac.sfbay/export/sac/ARC/$ARC/
-/net/sac.sfbay/export/sac/ARC/$ARC/$YYYY/$NUM
-/net/sac.sfbay/export/sac/ARC/$ARC/Agenda
-/net/sac.sfbay/export/sac/ARC/$ARC/agenda
-/net/sac.sfbay/export/sac/ARC/$ARC/Opinions/
-/net/sac.sfbay/export/sac/ARC/$ARC/advice/
-/net/sac.sfbay/export/sac/ARC/$ARC/Minutes/
-/net/sac.sfbay/export/sac/ARC/$ARC/mail/
-EOF
-}
-
-socks () {
-    echo "scaea-socks.sun.com nwkea-socks.sun.com (port 1080)"
 }
 
 hex2ascii () {
@@ -1334,158 +1132,4 @@ hex2ascii () {
 	    print -n " "
 	done
 	print
-}
-
-binky () {
-	typeset term
-	if ! ifconfig ip.tun0 >/dev/null 2>&1
-	then
-		print -u2 "Not punched in!"
-		if ! dig binky.us.oracle.com. in a +noall +answer | 
-			/usr/xpg4/bin/grep -q '^binky'
-		then
-			print -u2 "And not on SWAN either"
-			return 1
-		fi
-		print -u2 "But on SWAN, apparently"
-	fi
-	while ! klist -s
-	do
-		kinit -f nw141292@SUN.COM
-	done
-	term=$TERM
-	[[ "$term" = xterm-color ]] && term=xterm
-	TERM=$term ssh -e none -o gssapidelegatecredentials=yes \
-		-o preferredauthentications=gssapi-keyex,publickey \
-		-l nw141292 binky.us.oracle.com "$@"
-}
-
-binkywho () {
-	binky -n -t who\|grep dhcp\>/tmp/a\;cat /tmp/a
-}
-
-sbinky () {
-	if ! ifconfig ip.tun0 >/dev/null 2>&1
-	then
-		print -u2 "Not punched in!"
-		if ! dig binky.us.oracle.com. in a +noall +answer | 
-			/usr/xpg4/bin/grep -q '^binky'
-		then
-			print -u2 "And not on SWAN either"
-			return 1
-		fi
-		print -u2 "But on SWAN, apparently"
-	fi
-	while ! klist -s
-	do
-		kinit -f nw141292@SUN.COM
-	done
-	sftp -o gssapidelegatecredentials=yes \
-		-o preferredauthentications=gssapi-keyex,publickey \
-		nw141292@binky.us.oracle.com
-}
-
-function vl {
-	typeset w p
-	w=$1
-	p=$2
-	shift 2
-	ssh -A -l root -o gssapikeyexchange=no -o preferredauthentications=publickey,password -o "hostkeyalias=vl${w}-64" -p $p kemmer "$@"
-}
-
-function svl {
-	typeset w
-	w=$1
-	p=$2
-	shift 2
-	sftp -o "hostkeyalias=vl${w}-64" -o port=$p root@kemmer "$@"
-}
-
-function vl1 {
-	vl 1 2223 "$@"
-}
-
-function svl1 {
-	svl 1 2223 "$@"
-}
-
-function vl2 {
-	vl 2 2224 "$@"
-}
-
-function svl2 {
-	svl 2 2224 "$@"
-}
-
-function vl3 {
-	vl 3 2225 "$@"
-}
-
-function svl3 {
-	svl 3 2225 "$@"
-}
-
-function cvl1 {
-	socat -,raw,cs8,echo=0,escape=0x0f UNIX-CONNECT:/tmp/vl1-console
-}
-
-function xcvl1 {
-	terminator -x socat -,raw,cs8,echo=0,escape=0x0f UNIX-CONNECT:/tmp/vl1-console &
-}
-
-function cvl2 {
-	socat -,raw,cs8,echo=0,escape=0x0f UNIX-CONNECT:/tmp/vl2-console
-}
-
-function xcvl2 {
-	terminator -x socat -,raw,cs8,echo=0,escape=0x0f UNIX-CONNECT:/tmp/vl2-console &
-}
-
-function llyx {
-	if (removeFromXPATH PATH /opt/csw/bin; whence pdflatex > /dev/null; exit $?)
-	then
-	    (exec lyx "$@")&
-	    disown %%
-	else
-	    (PATH=$PATH:/usr/teTeX/bin/i386-pc-solaris2.11 exec lyx "$@") &
-	    disown %%
-	fi
-}
-
-function path_perms {
-	typeset IFS h line n p perms pp pph
-	integer i
-	IFS=
-	i=${2:-1000}
-	set -o noglob
-	typeset -A pp
-	typeset -A pph
-	do_break=false
-	while read -r line
-	do
-		n=/${line#*/}
-		perms=${line%$n}
-		if [[ $n = / ]]
-		then
-			h=$(print -n -r -- ${perms}|digest -a sha1)
-		else
-			p=${n%/*}
-			p=${p:-/}
-			if [[ ${perms#[d-]} = ${pp[-$p]} ]]
-			then
-				h=${pp[$p]}
-			else
-				h=$(print -n -r -- "${perms#[d-]}${pp[$p]}"|digest -a sha1)
-			fi
-		fi
-		pp[$n]=$h
-		pp[-$n]=${perms#[d-]}
-		((pph[$h]+=1))
-		print -r -- $h $n
-		(( (i-=1) == 0 )) && break
-	done < $1
-	for h in "${!pph[@]}"
-	do
-		print "Count of path permissions: ${pph[$h]} ($h)"
-	done
 }
