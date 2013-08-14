@@ -1,9 +1,8 @@
 
-    alias ngs="java -server -classpath /usr/share/java/nailgun-0.7.1.jar:/usr/share/java/saxonb.jar com.martiansoftware.nailgun.NGServer 12345"
-    alias realias=". /home/nico/.kshaliases"
-    alias valias="\${EDITOR:-vi} /home/nico/.kshaliases"
-    alias rekshrc=". /home/nico/.kshrc.user"
-    alias rekshcd=". /home/nico/.kshcd"
+    alias realias=". $HOME/.kshaliases"
+    alias valias="\${EDITOR:-vi} $HOME/.kshaliases"
+    alias rekshrc=". $HOME/.kshrc.user"
+    alias rekshcd=". $HOME/.kshcd"
     alias vi="vim -X"
     alias vim="vim -X"
     alias gitb="git branch -a"
@@ -15,7 +14,6 @@
     alias gitdm="git diff master.."
     alias gits="git status -uno"
 
-    #alias gita="git add -uv"
     function gita {
 	# Call git add with -uv for non-file arguments, w/o -u for file
 	# arguments
@@ -179,41 +177,6 @@
         fi
     }
 
-    function libe {
-	typeset diffs
-
-	if [[ ! -d .git && ! -f lib/libedit/aclocal.m4 && ! -f lib/libedit/aclocal.m4- ]]; then
-	    printf "Wrong CWD?\n"
-	    return 1
-	fi
-	(( diffs=$(git diff lib/libedit/aclocal.m4 | wc -l) ))
-	if ((diffs)); then
-	    cp lib/libedit/aclocal.m4 lib/libedit/aclocal.m4-
-	    git checkout -- lib/libedit/aclocal.m4
-	    printf "Ready to pull\n"
-	elif [[ -f lib/libedit/aclocal.m4- ]]; then
-	    cp lib/libedit/aclocal.m4- lib/libedit/aclocal.m4
-	    (( diffs=$(git diff lib/libedit/aclocal.m4 | wc -l) ))
-	    if ((diffs)); then
-		printf "Ready to build\n"
-	    else
-		rm lib/libedit/aclocal.m4-
-		printf "Must re-./configure\n"
-	    fi
-	else
-	    printf "Must re-./configure\n"
-	fi
-    }
-
-    wget=wget
-
-    alias vbsetuuid='VBoxManage internalcommands setvdiuuid'
-
-    bzflag () {
-	#/opt/csw/bin/bzflag -view normal -m -window -d -no3dfx -multisample "$@"
-	nice -n -1 ppriv -s i=none,file_read,file_write,net_access -e $HOME/sw/bin/bzflag -window "$@"
-    }
-
     alias l='ls -F'
     alias L='ls -LF'
     alias la='ls -Fa'
@@ -222,8 +185,6 @@
     alias lla='ls -la'
     alias llr='ls -lR'
     alias llra='ls -lRa'
-
-    [[ -x ~/sw/bin/mutt ]] && sparc && alias mutt=~/sw/bin/mutt
 
     rfcsearch () {
 	typeset arg f
@@ -343,16 +304,6 @@
 	)
     }
 
-    fmoz () {
-	(
-	    ps -ef | grep \[m]ozilla-bin | grep \[n]w141 | \ 
-		tee /dev/fd/2 | read j pid rest
-	    print -- truss -fp $pid
-	    print -- kill $pid
-	) 2>&1
-	return $?
-    }
-
     # A little wrapper around find that filters out all sorts of version
     # control systems' directories.
     #
@@ -377,27 +328,6 @@
             find "${dargs[@]}" \( \( -name SCCS -o -name CVS -o -name .hg -o -name .git \) -type d -prune \) -o \( \( "$@" \) -print \)
 	    return $?
         fi
-    }
-
-    dates () {
-	typeset tz m tabs tzs
-	m=0
-	tzs="US/Pacific US/Mountain US/Central US/Eastern GMT GB Eire Europe/Amsterdam Asia/Singapore Asia/Tokyo"
-	for tz in $tzs
-	do
-	    [[ ${#tz} -gt $m ]] && m=${#tz}
-	done
-	for tz in $tzs
-	do
-	    print -n "$tz:	"
-	    tabs=$(( ($m / 8) - (${#tz} / 8) )) 
-	    while [[ $tabs -gt 0 ]]
-	    do
-		print -n "	"
-		tabs=$((tabs-1))
-	    done
-	    print "$(TZ=$tz date)"
-	done
     }
 
     pathItems () {
@@ -627,122 +557,6 @@
 		return $status
 	}
 
-	procenv ()
-	{
-		typeset OIFS in out var val
-		in="$1"
-		out="$2"
-		shift 2
-		OIFS="$IFS"
-		IFS="="
-		while read line
-		do
-			IFS="="
-			set -- $line
-			var=$1
-			shift 1
-			val="$*"
-			IFS="$OIFS"
-			print -- "${var}=\"${val}\""
-			IFS="="
-			print "export $var"
-		done < $in > $out
-	}
-
-    rxscreen ()
-    {
-	typeset rxvt
-	rxvt=$(whence rxvt)
-	if [[ -n "$rxvt" ]]
-	then
-	    args="-rv -sr -font 9x15 -sl 8192 -geometry"
-	    xterm="$rxvt"
-	else
-	    xscreen "$@"
-	    return $?
-	fi
-	if [[ "$1" = n ]]
-	then
-	    "$rxvt" -backspacekey '' -deletekey '' $args ${2:-80x40} -e env HISTFILE= screen &
-	    return 0
-	fi
-	typeset screen_str state
-	screen -ls|grep pts|head -$1 | tail -1|read screen_str state
-	if [[ "$state" = ?Detached? ]]
-	then
-	    $rxvt -T "xscreen$1" -backspacekey '' -deletekey '' $args ${2:-80x40} -e screen -r $screen_str &
-	else
-	    $rxvt -T "xscreen$1" -backspacekey '' -deletekey '' $args ${2:-80x40} -e screen -d -r $screen_str &
-	fi
-    }
-
-    xscreen ()
-    {
-	typeset xterm args arg1 arg2
-	xterm=$(whence xterm)
-	: "${xterm:=/usr/openwin/bin/xterm}"
-	args="-rv -sb +sf -sl 8192 -geo"
-
-	arg1=n
-	arg2=80x40
-	if [[ "$#" -gt 0 ]]
-	then
-	    arg1="$1"
-	    shift
-	    if [[ $# -gt 0 ]]
-	    then
-		arg2="$1"
-		shift
-	    fi
-	fi
-
-	[[ "$arg2" = - ]] && arg2=110x44
-
-	if [[ "$arg1" = n ]]
-	then
-	    HISTFILE= "$xterm" $args ${arg2:-80x40} -e screen "$@" &
-	    return 0
-	elif [[ "$arg1" = s ]]
-	then
-	    (
-	    if [[ -d /ws/on10-clone-aus/usr/src/. ]]
-	    then
-		sunwspro -aus ; cd /ws/on10-clone-aus/usr/src ;
-	    else
-		sunwspro ; cd /ws/on10-clone/usr/src ;
-	    fi
-	    ENV=/home/nw141292/.kshrc.user EDITOR="svim" "$xterm" \
-		$args ${arg2:-110x34} -e screen cscope.ksh &
-	    )
-	    return 0
-	fi
-
-	typeset screen_str state
-	screen -ls|grep pts|head -$arg1 | tail -1|read screen_str state
-	if [[ "$state" = ?Detached? ]]
-	then
-	    $xterm -T "xscreen$arg1" $args ${arg2:-80x40} -e screen -r $screen_str "$@" &
-	else
-	    $xterm -T "xscreen$arg1" $args ${arg2:-80x40} -e screen -d -r $screen_str "$@" &
-	fi
-    }
-
-	rscreen_alias ()
-	{
-		typeset screen_str state arg1
-		arg1=$1
-		shift
-		screen -ls|grep pts|head -$arg1 | tail -1|read screen_str state
-		if [[ "$state" = ?Detached? ]]
-		then
-			screen -r $screen_str "$@"
-		else
-			screen -d -r $screen_str "$@"
-		fi
-	}
-
-
-
 	mfxg () {
 		typeset pat
 		pat="$1"
@@ -790,16 +604,6 @@
 	#xtitle () {
 	#	print -n "]0;${1}"
 	#}
-
-    ilynx () {
-	typeset j w hurl furl
-
-	w=~/.wgetrc
-	[[ -f "~/.wgetrc" ]] || w=/home/nw141292/.wgetrc
-	grep http_proxy "$w"|read j j hurl
-	grep ftp_proxy "$w"|read j j furl
-	eval http_proxy=\"$hurl\" ftp_proxy=\"$furl\" lynx \"\$@\"
-    }
 
     ietf_mget () {
 	typeset ietf_arch which usage l d m y current merge newmail this_year this_month lastc
@@ -1018,97 +822,8 @@ netpath ()
 		print
 	done
 }
-function fqdn
-{
-    typeset line word rest junk name
-    nslookup "$1"|while read line
-    do
-	if [[ "$line" = Name:* ]]
-	then
-	    while read word rest
-	    do
-		if [[ "$word" = Address: ]]
-		then
-		    nslookup "$rest"|grep ^Name:|read junk name
-		    print -- "$name"
-		    break
-		elif [[ "$word" = Addresses: ]]
-		then
-		    for address in $rest
-		    do
-			nslookup "${address%,*}"|grep ^Name:|read junk name
-			print -- "$name"
-		    done|sort -u
-		fi
-		break
-	    done
-	fi
-    done|tr '[A-Z]' '[a-z]'
-}
-function fqdn_domain
-{
-    typeset name dname
-    fqdn "$1"|while read name
-    do
-	eval "dname=\${name#${1}}"
-	print -- "$dname"
-    done
-}
-function fool
-{
-	typeset -i i j num
-	typeset nums rslt
-	rslt=""
-	set -A nums -- "$@"
-	i=0
-	while [[ $i -lt ${#nums[@]} ]]
-	do
-		j=i
-		while [[ $j -lt ${#nums[@]} ]]
-		do
-			[[ $((j+1)) -eq ${#nums[@]} ]] && break
 
-			if [[ ${nums[$((j+1))]} -eq $(( ${nums[$j]} + 1)) ]]
-			then
-				j=j+1
-			else
-				break
-			fi
-		done
-		if [[ $i -eq $j ]]
-		then
-			rslt="$rslt,${nums[$i]}"
-			i=i+1
-		elif [[ $((i+1)) -eq $j ]]
-		then
-			rslt="$rslt,${nums[$i]},${nums[$j]}"
-			i=j+1
-		else
-			rslt="$rslt,${nums[$i]}-${nums[$j]}"
-			i=j+1
-		fi
-	done
-	print ${rslt#,}
-}
-
-function cdws
-{
-    sunwspro -aus; whence ws > /dev/null || sunwspro
-    for i in iquad iquad.central
-    do
-	if [[ -d /net/$i/pool/nico/ws ]]
-	then
-	    cdto /net/$i/pool/nico/ws
-	    return 0
-	fi
-    done
-    return 1
-}
-
-function oncsc
-
-function ctptree
-{
+function ctptree {
     ps -o pid,ppid,pgid,ctid,args -p \
 	$(print $(ptree "${1:-$$}"|awk '{print $1}')|sed 's/ /,/g')
 }
