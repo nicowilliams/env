@@ -1,3 +1,61 @@
 #!/bin/ksh
 
-HISTFILE= EDITOR=svim exec screen
+set -e
+
+export HISTFILE=
+export EDITOR=svim
+
+function usage {
+    cat <<EOF
+Usage: nscreen [-n name] directory [screen args]
+    Starts a top-level screen if called not within a screen.  Otherwise
+    starts a nested screen.
+Usage: nscreen -T directory ... [-- screen args]
+    Starts a new top-level screen if called not within a screen.  Then,
+    or otherwise, it starts a screen for each argument up to --.  If an
+    argument is - then just a window is started, but no screen.
+EOF
+    exit 1
+}
+
+[[ "$1" = -h ]] && usage
+[[ "$1" = -n && $# -lt 2 ]] && usage
+
+name=
+if [[ "$1" = -n ]]; then
+    name=$2
+    shift 2
+fi
+
+if [[ "$1" = -T ]]; then
+    [[ -z "$STY" ]] && exec screen -S "${name:-top}" "$0" "$@"
+    shift
+    i=0
+    while [[ $# -gt 0 && "$1" != -- ]]; do
+        dirs[$i]=$1
+        ((i += 1))
+        shift
+    done
+    (($#)) && shift # shift out the --, if there was one
+    cwd=$PWD
+    for dir in "${dirs[@]}"; do
+        cd "$dir"
+        dir=${dir%/} # remove trailing /
+        screen -t "${dir##*/}" env STY= screen -S "${dir##*/}" "$@"
+        sleep .5
+        cd "$cwd"
+    done
+    exit 0
+fi
+
+dir=$PWD
+if (($#)); then
+    dir=${1%/}
+    cd "$1"
+    shift
+fi
+
+[[ -z "$STY" ]] && exec screen -S "${name:-top}" "$@"
+
+exec screen -t "${name:=${dir##*/}}" env STY= screen -S "${name}" "$@"
+
