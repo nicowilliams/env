@@ -1,61 +1,92 @@
 #!/bin/ksh
 
+PROG=${0##*/}
+
 set -e
+
+eval $(find-ssh-agent)
+
+function usage {
+    cat <<EOF
+Usage:  $PROG [-t <name>] [<dirs>] [-- <screen args>]
+
+    If not inside a screen then a top-level screen will be started with
+    ^T as the escape character.  Else a nested screen will be started
+    for each given directory (or the current directory otherwise).  When
+    a nested screen is started it will be started in a window of the
+    parent; both the new screen and the new window will have the same
+    name.
+
+    Any additional screen arguments will be passed to screen.
+
+    When starting a top-level screen its name will be <name>, if -t is
+    given, else "TOP".  Otherwise the screen's name (and the new window
+    in the parent) will be named after the basename of the directory.
+
+    Top-level screens get ^Tt as the escape character.
+    Second-level screens get ^Aa as the escape character.
+    Third-level screens get ^Yy as the escape character.
+EOF
+    exit "${1:-1}"
+}
+
+typeset -i depth=${MUX_NEST_LEVEL:-0}
+name=
+escape='^Aa'
+if [[ -z $STY && -z $TMUX ]]; then
+    name=TOP
+    escape='^Tt'
+else
+    ((depth++))
+    ((depth < 1)) &&
+        printf 'Warning: depth should be > 0 but is %d\n' "$depth"
+fi
+
+export MUX_NEST_LEVEL=$depth
+
+if [[ "$MUX_NEST_LEVEL" -gt 1 ]]; then
+    escape='^Yy'
+fi
+
+while getopts hde:t: opt; do
+    case "$opt" in
+    t)  name=$OPTARG;;
+    e)  escape=$OPTARG;;
+    h)  usage 0;;
+    *)  usage;;
+    esac
+done
+shift $((OPTIND - 1))
 
 export HISTFILE=
 export EDITOR=svim
 
-function usage {
-    cat <<EOF
-Usage: nscreen [-n name] directory [screen args]
-    Starts a top-level screen if called not within a screen.  Otherwise
-    starts a nested screen.
-Usage: nscreen -T directory ... [-- screen args]
-    Starts a new top-level screen if called not within a screen.  Then,
-    or otherwise, it starts a screen for each argument up to --.  If an
-    argument is - then just a window is started, but no screen.
-EOF
-    exit 1
-}
-
-[[ "$1" = -h ]] && usage
-[[ "$1" = -n && $# -lt 2 ]] && usage
-
-name=
-if [[ "$1" = -n ]]; then
-    name=$2
-    shift 2
+if [[ -z $STY && -z $TMUX ]]; then
+    [[ "$#" -gt 0 && "$1" != -- ]] && usage 1
+    [[ "$1" = -- ]] && shift
+    screen -e "$escape" -S "${name:-TOP}" "$@"
 fi
 
-if [[ "$1" = -T ]]; then
-    [[ -z "$STY" ]] && exec screen -S "${name:-top}" "$0" "$@"
+if (($# == 0)); then
+    set -- "$PWD"
+elif [[ "$1" = -- ]]; then
+    set -- "$PWD" "$@"
+fi
+
+while [[ $# -gt 0 && "$1" != -- ]]; do
+    (
+        cd "$1"
+        while [[ $# -gt 0 && "$1" != -- ]]; do
+            shift
+        done
+        [[ "$1" = -- ]] && shift
+        : ${name:=${PWD##*/}}
+        # It'd be nice to set the window title with escapes instead of
+        # -t, since -t is intended to reflect the program (shell)
+        screen -e "$escape" -t "$name" env TMUX= STY= screen -S "${name}-$depth" "$@"
+    )
     shift
-    i=0
-    while [[ $# -gt 0 && "$1" != -- ]]; do
-        dirs[$i]=$1
-        ((i += 1))
-        shift
-    done
-    (($#)) && shift # shift out the --, if there was one
-    cwd=$PWD
-    for dir in "${dirs[@]}"; do
-        cd "$dir"
-        dir=${dir%/} # remove trailing /
-        screen -t "${dir##*/}" env STY= screen -S "${dir##*/}" "$@"
-        sleep .5
-        cd "$cwd"
-    done
-    exit 0
-fi
+    [[ $# -gt 0 && "$1" != -- ]] && sleep .5
+done
 
-dir=$PWD
-if (($#)); then
-    dir=${1%/}
-    cd "$1"
-    shift
-fi
-
-[[ -z "$STY" ]] && exec screen -S "${name:-top}" "$@"
-
-exec screen -t "${name:=${dir##*/}}" env STY= screen -S "${name}" "$@"
-
+exit 0

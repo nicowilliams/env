@@ -1,0 +1,234 @@
+#!/bin/ksh
+
+PROG=${0##*/}
+
+set -eu -o pipefail
+
+unset TMUX_PANE
+
+eval $(find-ssh-agent -s)
+
+function usage {
+    typeset w=short
+    if [[ ${1:-1} != +([0-9]) ]]; then
+        w=$1
+        shift
+    fi
+    typeset -i code=${1:-1}
+    if ((code>0)); then
+        exec 1>&2
+    fi
+    cat <<EOF
+Usage:  $PROG [-e escape] [-t <name>] [<dirs>] [-- <tmux args>]
+        $PROG -w | -s [-e escape] [-t <name>] [<dirs>] [-- <wrapper and wrapper args>]
+        $PROG -n [-e escape] -t <name_prefix> [-- <tmux args>]
+        $PROG -n -w | -s [-e escape] -t <name_prefix> [-- <wrapper and wrapper args>]
+
+    Help options:
+
+      -h    Short help
+      -H    Long help
+EOF
+
+    if [[ $w = short ]]; then
+        cat <<EOF
+
+    Options:
+      -n    Create a single new session in the current window of the
+            current session (i.e., don't create a new window for the
+            new session).
+      -w    Use a wrapper program that will get a tmux invocation as
+            extra arguments.
+      -s    Use a shell-style wrapper program that will get a tmux
+            invocation as a single, quoted string.
+      -e    Escape for tmux
+      -t    Name prefix for the new tmux session
+EOF
+        exit $code
+    fi
+
+    cat <<EOF
+
+    The first usage starts as many tmux sessions as directories given
+    (or \$PWD), one in each directory, each in a new window in the
+    current session.
+
+    The second usage wraps the invocation of the new tmux session with
+    the given wrapper program and arguments.  For shell-style wrappers
+    (which expect a properly-escaped, single-string command argument to
+    exec), use -s.  For example, this starts a new session as the user
+    foo:
+
+      ntmux -s -- -- sudo su -l foo -c
+
+    (The first -- ends the normal arguments, the second ends the
+    directory list.)
+
+    The third and fourth usages are like the first and second,
+    respectively, but the new tmux session will be started in the
+    current window of the current session, with the given directory as
+    the current directory (if given), and with the given tmux arguments.
+
+    If not inside a tmux session then a top-level tmux session will be
+    started with ^T as the escape character.  Else a nested tmux session
+    will be started for each given directory (or the current directory
+    otherwise).  When a nested tmux session is started it will be
+    started in a window of the parent session; both the new session and
+    the new window will have the same name.
+
+    Any additional tmux arguments will be passed to tmux.
+
+    When starting a top-level session its name will be <name>, if -t is
+    given, else "TOP".  Otherwise the session's name (and the new window
+    in the parent) will be named after the basename of the directory.
+
+    Top-level sessions get ^Tt as the escape character.
+    Second-level sessions get ^Aa as the escape character.
+    Third-level sessions get ^Yy as the escape character.
+EOF
+    exit $code
+}
+
+# Very basic, not perfect (in particular single-quotes are not escaped)
+function sh_escape_args {
+    typeset space=
+    while (($# > 0)); do
+        printf "%s'%s'" "$space" "$1"
+        space=" "
+        shift
+    done
+}
+
+typeset -i depth=${MUX_NEST_LEVEL:-0}
+given_name=
+escape='a'
+if [[ -z ${TMUX:-} && -z ${STY:-} ]]; then
+    given_name=TOP
+    escape='t'
+else
+    ((depth++)) || true
+    ((depth < 1)) &&
+        printf 'Warning: depth should be > 0 but is %d\n' "$depth" 1>&2
+fi
+
+export MUX_NEST_LEVEL=$depth
+
+if [[ $MUX_NEST_LEVEL -gt 1 ]]; then
+    escape='y'
+fi
+
+wrap=false
+given_name=
+new_window=true
+shell_wrap=false
+while getopts Hhde:nt:swx opt; do
+    case "$opt" in
+    t)  given_name=$OPTARG;;
+    e)  escape=$OPTARG;;
+    n)  new_window=false;;
+    h)  usage 0;;
+    H)  usage long 0;;
+    s)  shell_wrap=true; wrap=false;;
+    w)  wrap=true; shell_wrap=false;;
+    x)  set -x;;
+    *)  usage 1;;
+    esac
+done
+shift $((OPTIND - 1))
+
+export HISTFILE=
+export EDITOR=svim
+
+if [[ -z ${TMUX:-} && -z ${STY:-} ]]; then
+    # Create the TOP session
+    [[ $# -gt 0 && $1 != -- ]] && usage 1
+    [[ $1 = -- ]] && shift
+    exec tmux -L "${given_name:-TOP}" new-session -s "${given_name:-TOP}"\; \
+        set prefix "C-$escape"\; \
+        bind-key "C-$escape" last-window\; \
+        bind-key "$escape" send-prefix\; \
+        "$@"
+    exit $?
+fi
+
+if ! $new_window; then
+    [[ -z ${given_name:-} ]] && usage 1
+    # Create a new session in this window
+    if (($# == 0)) || [[ $1 == -- ]]; then
+        # -> Don't create a new window and don't cd
+        [[ $1 == -- ]] && shift
+        unset TMUX TMUX_PANE STY
+        # Set the current window's title to the new session's given name
+        printf '\033k%s\033\\' "${given_name}"
+        if $wrap; then
+            exec "$@" -- tmux -L "${given_name}-$depth" new-session -s "${given_name}-$depth"\; set prefix C-a\; bind-key C-a last-window\; bind-key a send-prefix\;
+        elif $shell_wrap; then
+            exec "$@" "tmux -L \"${given_name}-$depth\" new-session -s \"${given_name}-$depth\"\; set prefix C-a\; bind-key C-a last-window\; bind-key a send-prefix\;"
+        else
+            exec tmux -L "${given_name}-$depth" new-session -s "${given_name}-$depth"\; set prefix C-a\; bind-key C-a last-window\; bind-key a send-prefix\; "$@"
+        fi
+    else
+        usage 1
+    fi
+    exit 1
+fi
+
+if (($# == 0)); then
+    set -- "$PWD"
+fi
+
+# For each argument create a new session in that directory...
+typeset -a dirs=()
+while [[ $# -gt 0 && $1 != -- ]]; do
+    dirs+=("$1")
+    shift
+done
+[[ ${1:-} = -- ]] && shift
+
+if ((${#dirs[@]} == 0)); then
+    dirs+=("$PWD")
+fi
+
+for dir in "${dirs[@]}"; do
+    name=${dir##*/}
+    [[ -n ${given_name} ]] && name=${given_name}-${name}
+
+    if ! $new_window; then
+        # ...in this window
+        if (($# > 0)); then
+            printf 'Error: -n is incompatible with multiple directories\n' 1>&2
+            exit 1
+        fi
+        cd "$dir"
+        unset TMUX TMUX_PANE STY
+        printf '\033k%s\033\\' "${name}"
+        if $wrap; then
+            "$@" -- tmux -L "${name}-$depth" new-session -s "${name}-$depth"\; set prefix C-a\; bind-key C-a last-window\; bind-key a send-prefix\;
+        elif $shell_wrap; then
+            "$@" "tmux -L \"${name}-$depth\" new-session -s \"${name}-$depth\"\; set prefix C-a\; bind-key C-a last-window\; bind-key a send-prefix\;"
+        else
+            exec tmux -L "${name}-$depth" new-session -s "${name}-$depth"\; set prefix C-a\; bind-key C-a last-window\; bind-key a send-prefix\; "$@"
+        fi
+        exit 1
+    fi
+
+    # ...in a new window
+    (
+        if ! cd "$dir"; then
+            printf 'Error: could not cd to %s\n' "$dir" 1>&2
+            exit 1
+        fi
+        tmux new-window -n "$name" "env TMUX= TMUX_PANE= STY= tmux -L '${name}-$depth' new-session -s '${name}-$depth'\\; set prefix C-a\\; bind-key C-a last-window\\; bind-key a send-prefix\\; $*"
+        if $wrap; then
+            tmux new-window -n "$name" "env TMUX= TMUX_PANE= STY= $(sh_escape_args "$@") tmux -L '${name}-$depth' new-session -s '${name}-$depth'\\; set prefix C-a\\; bind-key C-a last-window\\; bind-key a send-prefix\\;"
+        elif $shell_wrap; then
+            tmux new-window -n "$name" "env TMUX= TMUX_PANE= STY= $(sh_escape_args "$@") \"tmux -L '${name}-$depth' new-session -s '${name}-$depth'\\; set prefix C-a\\; bind-key C-a last-window\\; bind-key a send-prefix\\;\""
+        else
+            tmux new-window -n "$name" "env TMUX= TMUX_PANE= STY= tmux -L '${name}-$depth' new-session -s '${name}-$depth'\\; set prefix C-a\\; bind-key C-a last-window\\; bind-key a send-prefix\\; $(sh_escape_args "$@")"
+        fi
+    )
+    # Don't race to create windows in parent session
+    sleep .5
+done
+
+exit 0

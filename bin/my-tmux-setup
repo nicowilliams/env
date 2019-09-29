@@ -1,0 +1,219 @@
+#!/bin/bash
+
+set -euo pipefail
+
+ops_tmux="tmux -L default-${USER} a || ptstart tmux -f .tmux.conf-${USER} -L default-${USER} new-session -s default-${USER}"
+imapproxyd_cmd="$HOME/ws/imap_proxy/bin/in.imapproxyd -p /tmp/imapp.pid -f $HOME/gmail/imapproxy.conf"
+
+function usage {
+    ((${1:-1})) && exec 1>&2
+    ! $configured && [[ -f $cfg ]] && . "$cfg"
+    cat <<EOF
+Usage: ${0##*/} [options] [DIR...]
+    Options:
+
+     -h         Usage
+     -c FILE    Configuration file (default: ${cfg:-\$HOME/.tmux-${top:-top}.sh})
+     -i         Interactive
+     -p PREFIX  Prefix for all sessions to be created (default: )
+     -s SERVER  Create a window to for a tmux session on SERVER
+     -s ''      Reset server list
+     -w DIR     Create a nested session for DIR; if DIR is not
+                absolute then \$HOME/ws/ will be prefixed to it
+     -w ''      Reset workspace list
+     -x FILE    Trace and leave output in FILE
+
+    For each SERVER a window will be created to ssh to SERVER and attach
+    or create and attach to a remote tmux session named default-\${USER}
+    ($USER).  E.g., -s tsents@tsents1.dft.twosigma.com.
+
+    For each workspace DIR, after creating the nested session, a file
+    named DIR-tmux-setup will be run if it exists and is executable.
+    E.g., $HOME/ws/foo-tmux-setup, which can create windows the session
+    named by the first argument given to it.  (The second argument will
+    be DIR.)
+
+    Configured server list:
+$(echo "        ${ops_servers[*]}"|fmt -p '        ' -w 65)
+
+    Configured workspace list:
+$(echo "        ${wslist[*]}"|fmt -p '        ' -w 65)
+
+EOF
+    exit ${1:-1}
+}
+
+## Utility functions
+
+function dry_run {
+    printf 'Would have run:'
+    printf ' %s' "$@"
+    printf '\n'
+}
+
+function do1 {
+    local msg="$1"
+    shift
+    printf '%s' "$msg"
+    if $interactive; then
+        printf ' [yes/no/quit] '
+        read ans
+        [[ $ans = q || $ans = quit ]] && exit 1
+        [[ $ans = y || $ans = yes ]] || return 0
+    else
+        printf '...\n'
+    fi
+    if $interactive && [[ $1 != exec ]]; then
+        (set -vx; $dry_run "$@")
+    else
+        $dry_run "$@"
+        $sleep .5
+    fi
+}
+
+function attach {
+    do1 'Attaching to session' exec tmux -L "$top" attach-session
+    exit 0
+}
+
+function new_window {
+    local msg="$1"
+    shift
+    do1 "$msg" tmux -L "$top" new-window "$@"
+}
+
+function new_session {
+    local msg="$1"
+    local name="$2"
+    local cwd="$3"
+    shift 3
+    do1 "$msg" tmux -L "$top" new-window -n "$name" -c "$cwd" -d \
+        "tmux -L ${name} new-session -s ${name}"
+    [[ -x ${cwd}-tmux-setup ]] && "${cwd}-tmux-setup" "$name" "$cwd" "$@"
+    # XXX We should have a script to generate ${cwd}-tmux-setup by inspecting a
+    #     running tmux for that session.
+}
+
+## Options
+
+top=default
+tmux_cfg=
+trace=false
+sleep=sleep
+prefix=
+dry_run=
+configured=false
+interactive=false
+wslist=()
+ops_servers=()
+if (($#)); then
+    while getopts +:c:hinp:s:t:w:x: opt; do
+    case "$opt" in
+    c)  . "$OPTARG"; configured=true;;
+    h)  usage 0;;
+    i)  interactive=true;;
+    n)  dry_run=dry_run; sleep=true; $trace && set -v;;
+    p)  prefix=$OPTARG;;
+    s)  if [[ -z $OPTARG ]]; then
+            ops_servers=()
+        else ops_servers+=("$OPTARG")
+        fi;;
+    t)  tmux_cfg=$OPTARG;;
+    w)  if [[ -z $OPTARG ]]; then
+            wslist=()
+        else wslist+=("$OPTARG")
+        fi;;
+    x)  trace=true
+        exec {tracefd}>"$OPTARG"; BASH_XTRACEFD=$tracefd;
+        [[ -n $dry_run ]] && set -v
+        set -x;;
+    *)  usage;;
+    esac
+    done
+    shift $((OPTIND-1))
+fi
+wslist+=("$@")
+shift $#
+
+top=${prefix}default
+cfg=$HOME/.tmux-${top}.sh
+
+! $configured && [[ -f $cfg ]] && . "$cfg"
+
+## MAIN
+
+if [[ -n ${TMUX:-} && -z $dry_run ]]; then
+    printf 'Error: Running in a tmux session; run this outside tmux\n' 1>&2
+    exit 1
+fi
+
+eval $(find-ssh-agent -s)
+if ssh-add -l > /dev/null 2>&1; then
+    true
+else
+    case "$?" in
+    1)  true;;                  # We have       an agent, just no keys
+    *)  eval $(ssh-agent -s);;  # We don't have an agent; start one
+    esac
+fi
+
+if [[ -n ${KRB5CCNAME:-} && ${KRB5CCNAME#FILE:} != /tmp/krb5cc_$UID ]]; then
+    $dry_run cp "${KRB5CCNAME#FILE:}" "/tmp/krb5cc_$UID"
+    $dry_run export KRB5CCNAME=FILE:/tmp/krb5cc_$UID
+fi
+
+tmux -L "$top" has-session 2>/dev/null && attach
+
+if [[ -z $tmux_cfg ]]; then
+    tmux_cfg=$HOME/.tmux.top.conf
+    [[ -f $HOME/.tmux.${top}.conf ]] && tmux_cfg=$HOME/.tmux.${top}.conf
+fi
+
+# Create a top-level session with a nested session on window #0 for mutt and
+# such:
+if ! tmux -L mutt-1 has-session -t mutt-1; then
+    do1 "Creating a session for mutt"                                           \
+        tmux -L mutt-1 new-session -s mutt-1\; detach-client
+    do1 "Creating extra windows for mutt-1 session"                             \
+        tmux -L mutt-1 new-window -d\; new-window -d\; new-window -d
+    do1 "Starting imapproxy"                                                    \
+        tmux -L mutt-1 new-window -d "$imapproxyd_cmd" 2>/dev/null
+fi
+
+do1 "Creating a top-level (\"$top\") session"                               \
+    tmux -f "$tmux_cfg" -L "$top"                                           \
+         new-session -s "$top" -n mutt-1                                    \
+             "tmux -L mutt-1 attach-session -t mutt-1"                  \;  \
+         set prefix C-t                                                 \;  \
+         bind-key C-t last-window                                       \;  \
+         bind-key t send-prefix                                         \;  \
+         detach-client
+
+# Create a window #1 in which to run "ntmux ..." to create new nested sessions
+# as needed:
+new_window 'Creating a window "launcher" in the top-level session'          \
+    -n launcher -c "$HOME/ws"
+
+# Create windows for ops:
+if ((${#ops_servers[@]})); then
+for srv in "${ops_servers[@]}"; do
+    new_window "Creating a window for $srv in the top-level session"        \
+               -n ${srv%.twosigma.com} "ssh -t $srv '${ops_tmux}'"
+done
+fi
+
+# Create nested sessions for workspaces:
+if ((${#wslist[@]})); then
+for ws in "${wslist[@]}"; do
+    p=$ws
+    [[ $ws != /* ]] && p=$HOME/ws/$ws
+    [[ -d $p ]] || continue
+    ! new_session "Creating a nested session for workspace ${ws}"             \
+      "${prefix}${ws}-1" "$p" &&
+    ! tmux -L "${prefix}${ws}-1" has-session -t "${prefix}${ws}-1" &&
+            printf 'Warning: failed to create workspace tmux for %s\n' "$ws"
+done
+fi
+
+# Attach the top-level tmux
+attach

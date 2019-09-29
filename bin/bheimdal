@@ -1,0 +1,158 @@
+#!/bin/bash
+
+set -euo pipefail
+
+declare -A def_configure_opts
+def_configure_opts=(
+    [--prefix*]="--prefix=/tmp/h5l"
+    [--localstatedir*]="--localstatedir=/var/heimdal"
+    [--with-openssl]=--with-openssl
+    [--with-openldap]=--with-openldap=/usr
+    # libcap-ng-dev:i386 conflicts with libcap-ng-dev
+    [--*-capng]=--without-capng
+    [--*-maintainer-mode]=--enable-maintainer-mode
+    [CFLAGS=*]=CFLAGS=-ggdb3
+    # 'CC=clang'
+    # '--disable-afs-support'
+    # '--without-capng'
+    # '--with-atomic_ops=/tmp/atomic_ops'
+    # CC=clang 'CFLAGS=-g -O0'
+    # '--enable-developer'
+)
+
+srcdir=$PWD
+
+declare -a configure_opts
+configure_opts=(
+    "--srcdir=$srcdir"
+    --enable-maintainer-mode
+)
+
+nmake=6
+
+function usage {
+  cat <<EOF
+Usage: ${0##*/} [OPTIONS] [-- CONFIGURE-OPTIONS]
+Usage: ${0##*/} -S | -D   [-- CONFIGURE-OPTIONS]
+
+    Options:
+
+     -A     Don't re-run autogen.sh (don't run autoconf)
+     -V     Verbose build
+     -D     Show default ./configure options and nothing else
+     -S     Show effective ./configure options and nothing else
+     -i     Incremental build
+     -j N   Make parallelism (default: $nmake)
+     -t     Run make check (tests)
+     -s     Use scan-build (clang static analyzer)
+     -v     Verbose
+     -v -v  Verbose verbose
+     -x     Trace
+EOF
+  exit ${1:-1}
+}
+
+function v {
+  if $verbose; then
+    printf 'Running:'
+    printf ' %q' "$@"
+    printf '\n'
+  fi
+  "$@"
+}
+
+lint=false
+do_test=false
+verbose=false
+scan_build=
+no_autoconf=false
+incremental=false
+show_options=false
+verbose_build=
+while getopts "+ADSVhij:tsvx" opt; do
+case "$opt" in
+A) no_autoconf=true;;
+D) printf "Default configure options:\n"
+   printf "\t%q\n" "${def_configure_opts[@]}"
+   printf '\n'
+   exit 1;;
+S) show_options=true;;
+V) verbose_build=V=1;;
+h) usage 0;;
+i) incremental=true;;
+j) nmake=$OPTARG;;
+t) do_test=true;;
+s) lint=true; scan_build=scan-build;;
+v) if $verbose; then verbose=false; set -v; else verbose=true; fi;;
+x) set -x;;
+*) usage 1>&2;;
+esac
+done
+shift $((OPTIND - 1))
+
+if $lint; then
+  # Actually, this isn't necessary, IIUC
+  def_configure_opts[CC]=CC=clang
+fi
+
+arg=
+for pattern in "${!def_configure_opts[@]}"; do
+  for i in "$@"; do
+    arg=$i
+    [[ $arg = $pattern ]] && break
+  done
+  if [[ $arg = $pattern ]]; then
+    # Argument overrides default
+    configure_opts+=("$arg")
+  else
+    # No argument overrides default
+    configure_opts+=("${def_configure_opts[$pattern]}")
+  fi
+done
+
+# Add options without defaults
+for arg in "$@"; do
+  pattern=
+  for i in "${!def_configure_opts[@]}"; do
+    pattern="$i"
+    [[ $arg = $pattern ]] && break
+  done
+  if [[ $arg != $pattern ]]; then
+    configure_opts+=("$arg")
+  fi
+done
+
+if $show_options; then
+   printf "Configure options:\n"
+   printf "\t%q\n" "${configure_opts[@]}"
+   printf '\n'
+   exit 0
+fi
+
+if ! $incremental; then
+  [[ -d build ]] && v mv build build-
+  v rm -rf build- &
+  v mkdir build
+fi
+$no_autoconf || v ./autogen.sh
+v cd build
+v ../configure "${configure_opts[@]}"
+v make dist
+wait
+
+#
+if $verbose; then
+  printf 'Running: '
+  printf ' %s' make ${verbose_build} "-j$nmake"
+  if time $scan_build make ${verbose_build} "-j$nmake"; then
+    true
+  else
+    v sleep 2
+    time $scan_build make ${verbose_build} "-j$nmake"
+  fi
+else
+  time $scan_build make ${verbose_build} "-j$nmake" || (sleep 2; time $scan_build make ${verbose_build} "-j$nmake")
+fi
+
+$lint && exit 0
+$do_test && make ${verbose_build} check

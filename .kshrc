@@ -1,5 +1,5 @@
 
-stty erase 
+#stty erase 
 set -o vi
 set -o trackall
 HN=$(uname -n)
@@ -11,6 +11,8 @@ export PRINTER=uaus08p02dbl
 [[ -f $HOME/.kshcd ]] && . $HOME/.kshcd
 export SHELL=/bin/ksh
 export PS1='$(vcs_ps1)'
+
+for i in 1 2 3 4 5 6 7 8 9 -; do alias fg${i}="fg %$i"; done
 
 umask 022
 
@@ -41,6 +43,8 @@ then
 	alias vi=vim
     fi
 fi
+
+export CSCOPE_EDITOR=svim
 
 [[ "$TERM" = xterm ]] && TERM=xterm-color
 

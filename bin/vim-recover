@@ -1,6 +1,7 @@
 #!/bin/ksh
 
 set -o noglob
+set -e
 
 function err {
     typeset status
@@ -27,6 +28,7 @@ function usage {
 
     Options:
 
+	-a automatically recover if git ws is clean
 	-l list swap files
 	-r recover swap files
 	-D delete swap files
@@ -39,6 +41,7 @@ function usage {
 }
 
 dir=.
+auto=false
 confirm=:
 delete_them=false
 list=false
@@ -50,6 +53,7 @@ while (($# > 0)); do
     -l) list=:;;
     -r) recover=:;;
     -n) confirm=false;;
+    -a) auto=:; confirm=false; delete_them=:; recover=:;;
     -*) usage;;
     *) dir=$1;;
     esac
@@ -65,7 +69,6 @@ swap_files_list=$(mktemp /tmp/vr-XXXX)
 script=$(mktemp /tmp/vr-XXXX)
 
 trap "rm -f $script $swap_files_list ${swap_files_list}-x" EXIT INT QUIT HUP
-trap "rm -f $script $swap_files_list ${swap_files_list}-x; exit 0" INT QUIT HUP
 
 cat > "$script" <<EOF
 :wq!
@@ -81,6 +84,17 @@ n=$(wc -l < "$swap_files_list")
 ((n == 0)) && err 0 "No swap files found; workspace is clean"
 
 sed -e 's;/\.;/;' -e 's/\.sw.$//' < "$swap_files_list" > "${swap_files_list}-x"
+
+dirty=false
+if $auto; then
+    while read f; do
+        if (($(git status --porcelain "$f" | grep -v '^\?' | wc -l) )); then
+            print "DIRTY FILE: $f"
+            dirty=:
+        fi
+        $dirty && exit 1;
+    done < "${swap_files_list}-x"
+fi
 
 if $list; then
     cat "${swap_files_list}-x"
@@ -98,3 +112,5 @@ if $delete_them; then
     confirm "Ready to delete swap files?"
     xargs rm -f < "$swap_files_list"
 fi
+
+git status $(cat "${swap_files_list}-x")

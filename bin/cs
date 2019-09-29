@@ -1,0 +1,23 @@
+#!/usr/bin/ksh
+
+PROG=${0##*/}
+
+function usage {
+    cat <<EOF
+Usage: $PROG <cscope-search-number> [cscope options] <symbol>
+EOF
+    exit 1
+}
+
+set -e
+
+. $HOME/.kshaliases
+
+opts=""
+[[ -f cscope.out || -f "$(vcs_top)/cscope.out" ]] || opts="-Rqk"
+
+[[ "$1" = @([0-9])  && $# -gt 1 ]] || usage
+num=$1
+shift
+exec cscope $opts -lL$num "$@"
+

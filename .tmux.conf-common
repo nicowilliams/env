@@ -1,0 +1,56 @@
+
+# Basic screen keybindings (old habits die hard)
+bind-key p previous-window
+bind-key n next-window
+bind-key c new-window
+bind-key C-p previous-window
+bind-key C-n next-window
+bind-key C-c new-window
+unbind '"'
+bind '"' choose-window
+
+# If I want to kill something, I'll be explicit; no accidents please
+unbind x
+unbind '&'
+
+set -g visual-bell on
+
+# Copy mode
+unbind [
+bind-key [ copy-mode
+unbind ]
+bind-key ] paste-buffer
+
+# Use vi mode, except for the status line (commands)
+setw -g mode-keys vi
+set -g status-keys emacs
+
+#setw -g mode-mouse off
+
+# More straight forward key bindings for splitting
+unbind %
+bind h split-window -h
+bind v split-window -v
+
+# scrollback
+set -g history-limit 10000
+
+setw -g window-status-current-bg red
+setw -g clock-mode-colour green
+setw -g clock-mode-style 24
+
+set -g bell-action any
+set -g set-titles on
+#set -g set-titles-string ‘#H:#S.#I.#P #W #T’ # window number,program name,active (or not)
+set -g visual-bell off
+
+## Hate, HATE the alternate screen
+#setw alternate-screen off
+
+setw -g monitor-activity on
+set -g status-justify left
+set -g status-left-length 40
+set -g status-right-length 80
+#set -g status-bg black
+#set -g status-fg white
+

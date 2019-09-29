@@ -9,10 +9,21 @@
     alias gitbl="git branch"
     alias gitba="git branch -a"
     alias gitd="git diff"
+    alias gitds="git diff --staged"
     alias gitf="git format-patch master.."
     alias gitfs="git format-patch --stdout  master.."
     alias gitdm="git diff master.."
     alias gits="git status -uno"
+
+    alias fg1='fg %1'
+    alias fg2='fg %2'
+    alias fg3='fg %3'
+    alias fg4='fg %4'
+    alias fg5='fg %5'
+    alias fg6='fg %6'
+    alias fg7='fg %7'
+    alias fg8='fg %8'
+    alias fg9='fg %9'
 
     function gita {
 	# Call git add with -uv for non-file arguments, w/o -u for file
@@ -155,7 +166,6 @@
 
         top=$(vcs_top $vcs)
         branch=$(vcs_branch $vcs)
-        m=$(vcs_dirty_count $vcs)
 
         # Use the basename of the top-level as the workspace name and
         # work out an abbreviation of $PWD
@@ -169,11 +179,11 @@
 
         # Output SCM:top-level-basename[branch]:path-abbrev[dirty-count:cmdnum]%
         if [[ "$u" = root ]]; then
-            printf ": ${R}%s${N}:${Y}%s${N}[${G}%s${N}]:%s[%s:%s]${R}#${N}; \n" \
-                "$vcs" "$t" "${branch}" "$p" "$m" '!'
+            printf ": ${R}%s${N}:${Y}%s${N}[${G}%s${N}]:%s[%s]${R}#${N}; \n" \
+                "$vcs" "$t" "${branch}" "$p" '!'
         else
-            printf ": ${R}%s${N}:${Y}%s${N}[${G}%s${N}]:%s[%s:%s]%%; \n" \
-                "$vcs" "$t" "${branch}" "$p" "$m" '!'
+            printf ": ${R}%s${N}:${Y}%s${N}[${G}%s${N}]:%s[%s]%%; \n" \
+                "$vcs" "$t" "${branch}" "$p" '!'
         fi
     }
 
@@ -215,7 +225,7 @@
 		continue
 	    fi
 	    #$wget ftp://ftp.rfc-editor.org/in-notes/$i
-	    $wget http://www.rfc-editor.org/rfc/$i
+	    wget http://www.rfc-editor.org/rfc/$i
 	done
 	)
     }
@@ -299,7 +309,7 @@
 		print -u2 "$i already in ~/ietf/Drafts"
 		continue
 	    fi
-	    $wget http://www.ietf.org/internet-drafts/$i
+            wget https://tools.ietf.org/id/${i%.txt}.txt
 	done
 	)
     }
@@ -847,4 +857,98 @@ hex2ascii () {
 	    print -n " "
 	done
 	print
+}
+
+# Viktor's slow rebase
+#
+# slowrebase BRANCH_TO_REBASE ONTO
+function slowrebase {
+    typeset b N
+
+    if (($# > 0)) && [[ $1 = -h || $1 = --help ]]; then
+        printf 'Usage: slowrebase BRANCH_TO_REBASE ONTO_HEAD\n'
+        printf '       slowrebase # to continue after resolving conflicts\n'
+        printf '\n\tslowrebase is a shell function that uses the following\n'
+        printf '\tglobal variables to keep state: $S $T $B ${C[@]}\n'
+        printf '\t                                $slowrebase_window_sz\n'
+        printf '\tDO NOT CHANGE THOSE VARIABLES.\n'
+        return 0
+    elif (($# > 0 && $# != 2)); then
+        printf 'Usage: slowrebase BRANCH_TO_REBASE ONTO_HEAD\n' 1>&2
+        printf '       slowrebase # to continue after resolving conflicts\n'
+        printf '\n\tslowrebase is a shell function that uses the following\n' 1>&2
+        printf '\tglobal variables to keep state: $S $T $B ${C[@]}\n' 1>&2
+        printf '\t                                $slowrebase_window_sz\n' 1>&2
+        printf '\tDO NOT CHANGE THOSE VARIABLES.\n' 1>&2
+        return 1
+    fi
+
+    if (($# == 2)); then
+        slowrebase_window_sz=1
+        S=$1
+        T=$2
+        B=$(git merge-base "$S" "$T")
+        C=( $(git log --oneline "$B".."$2" | awk '{print $1}') )
+        set --
+
+        # Prep
+        git log -n1 "$S" > /dev/null || return 1
+        if [[ $(git log --oneline -n1 HEAD) != $(git log --oneline -n1 "$S") ]]; then
+            if (($(git status -sb | wc -l) != 1)); then
+                printf 'Error: please clean your workspace\n'
+                return 1
+            fi
+            git checkout "$S"
+        elif (($(git status -sbuno | wc -l) != 1)); then
+            printf 'Error: please clean your workspace\n'
+            return 1
+        fi
+
+        # Fall through to get started
+    elif [[ $(git log --oneline -n1 HEAD) != $(git log --oneline -n1 "$S") ]] &&
+       ! git rebase --continue; then
+        N=$(( ${#C[@]} - slowrebase_window_sz ))
+        printf '\nConflicts while rebasing $S (%s) slowly onto $T (%s)\n' "$S" "$T"
+        printf '${C[@]} has the commits left to process (%s left)\n' $N
+        printf '$B is the commit we are rebasing onto right now: %s\n' "$B"
+        printf '$b is the previous commit we had already rebased onto: %s\n' "$b"
+        return 1
+    fi
+
+    while ((${#C[@]} > 0)); do
+        printf '%s commits left\n' ${#C[@]}
+        N=$(( ${#C[@]} - slowrebase_window_sz ))
+        b=$B
+        B=${C[$N]}
+        printf 'Rebasing onto %s\n' "$(git log --oneline -n1 "$B")"
+        if git rebase --onto "$B" "$b" "$S"; then
+            # No conflicts.  Let's go faster if we can.
+            if ((slowrebase_window_sz < N)); then
+                ((slowrebase_window_sz++))
+            fi
+            C=(${C[@]:0:$N})
+            continue
+        fi
+
+        # We have conflicts; bisect if we can
+        if ((slowrebase_window_sz > 1)); then
+            # Bisect to find the first commit causing the conflicts
+            ((slowrebase_window_sz = (slowrebase_window_sz + 1) / 2))
+            git rebase --abort
+            continue
+        fi
+
+        # Finally, we have a commit causing conflicts.  The user has to
+        # resolve and invoke this function again.
+        unset C[$N]
+
+	printf '\nConflicts while rebasing $S (%s) slowly onto $T (%s)\n' "$S" "$T"
+	printf '${C[@]} has the commits left to process (%s left)\n' ${#C[@]}
+	printf '$B is the commit we are rebasing onto right now: %s\n' "$B"
+	printf '$b is the previous commit we had already rebased onto: %s\n' "$b"
+	return 1
+    done
+
+    printf '\n\nDONE!\n'
+    return 0
 }

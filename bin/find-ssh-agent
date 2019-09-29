@@ -1,0 +1,136 @@
+#!/bin/bash
+
+set -eu
+set -o pipefail
+shopt -s lastpipe
+
+function usage {
+    if [[ ${1:-1} != 0 ]]; then
+        exec 1>&2
+    fi
+    printf 'Usage: %s [-ahnsvx]\n' "${0##*/}"
+    exit "${1:-1}"
+}
+
+n=
+q=
+v=false
+s=false
+add=true
+while getopts "+ahnqsvx" opt; do
+    case "$opt" in
+    a) add=;;
+    h) usage 0;;
+    n) n=n;;
+    q) q=true; v=false;;
+    s) s=true;;
+    v) v=true; q=;;
+    x) set -x;;
+    *) usage;;
+    esac
+done
+shift $((OPTIND - 1))
+
+function v {
+    if [[ $1 == printf ]]; then
+        $v && "$@"
+        return 0
+    elif $v; then
+        printf 'Running: %s\n' "$*" 1>&2
+    fi
+    "$@"
+}
+
+function n {
+    if [[ $1 = v ]]; then
+        shift
+    fi
+    if [[ $1 = exit ]]; then
+        $q printf 'Exiting (%s)\n' "${2:-0}" 1>&2
+        "$@"
+    elif [[ $1 = printf ]]; then
+        v "$@" 1>&2
+        return 0
+    fi
+    if [[ $1 = ssh-add && $2 == -l && $# -eq 2 ]]; then
+        v "$@"
+        return $?
+    fi
+    $q printf 'Would have run:' 1>&2
+    $q printf " '%s'" "$@" 1>&2
+    $q printf '\n' 1>&2
+    return 0
+}
+
+if (($# > 1)) || [[ $# -eq 1 && $1 != -s ]]; then
+    usage
+    exit 1
+fi
+
+if [[ -n ${SSH_AUTH_SOCK:-''} ]]; then
+    $n v printf 'Env has evidence of an agent; checking it\n' 1>&2
+    if $n v ssh-add -l > /dev/null 2>&1; then
+        $n v printf 'Your agent is alive and has keys!\n' 1>&2
+        $s && $n v echo true
+        $add $n v ssh-add
+        $n v exit 0
+        exit 0
+    else
+        stat=$?
+        if (($stat == 1)); then
+            $n v printf 'Your agent is alive! (but it has no keys)\n' 1>&2
+            $add $n v ssh-add
+            $n v exit 0
+            exit 0
+        fi
+
+        # $stat == 2 or so
+        old=$SSH_AUTH_SOCK
+        $n v printf 'Your agent is dead! (ssh-add -l exited with %d)\n' "$stat" 1>&2
+        $n v printf 'Starting a new agent and swizzling %s to point to the new socket\n' "$old" 1>&2
+
+        eval $($n v ssh-agent -s) || exit 0
+        $n v rm -f "$old"
+        $n v mkdir -p "${old%/*}"
+        $n v ln -s "$SSH_AUTH_SOCK" "$old"
+        $add $n v ssh-add
+        $n v exit 0
+        exit 0
+    fi
+fi
+
+$n v printf 'This env never had an agent; looking for one to use...\n' 1>&2
+
+$n v cd /tmp
+ls -fd1 /run/user/$UID/keyring/ssh ssh-*/agent.* 2>/dev/null|while read a; do
+    [[ -O $a ]] || continue
+    $n v printf 'Checking if %s is alive... ' "$a" 1>&2
+    SSH_AUTH_SOCK="${a}"
+    export SSH_AUTH_SOCK;
+    if ! $n v ssh-add -l >/dev/null 2>&1; then
+        $n v printf 'nope\n' 1>&2
+        continue
+    fi
+    $n v printf 'yes!\n' 1>&2
+    if $s; then
+        cat <<EOF
+SSH_AUTH_SOCK="${a}"; export SSH_AUTH_SOCK;
+EOF
+    else
+        printf '%s\n' "$a" 1>&2
+    fi
+
+    $add $n v ssh-add 1>&2
+    exit 0
+done
+
+$n v printf 'No live agents found.  Starting one\n' 1>&2
+f=$(mktemp)
+$n v ssh-agent -s > "$f"
+if $s; then
+    eval $(cat $f) > /dev/null
+    cat $f
+fi
+$add $n v ssh-add 1>&2
+$n v exit 0
+exit 0
